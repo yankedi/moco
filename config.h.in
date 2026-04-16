@@ -1,0 +1,8 @@
+// config.h.in
+#ifndef MOCO_CONFIG_H
+#define MOCO_CONFIG_H
+
+#define MOCO_VERSION "@PROJECT_VERSION@"
+#define MOCO_BUILD_DATE "@CURRENT_DATE@"
+
+#endif
