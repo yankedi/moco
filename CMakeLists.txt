@@ -19,25 +19,25 @@ set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
         tomlc17
         GIT_REPOSITORY https://ghfast.top/https://github.com/cktan/tomlc17.git
-        GIT_TAG        main
+        GIT_TAG main
 )
 FetchContent_Declare(
         cjson
         GIT_REPOSITORY https://ghfast.top/https://github.com/DaveGamble/cJSON.git
-        GIT_TAG        master
+        GIT_TAG master
 )
 
 FetchContent_MakeAvailable(tomlc17 cjson)
 
 # tomlc17 upstream has no CMake target; create one from fetched source.
-if(NOT TARGET tomlc17)
+if (NOT TARGET tomlc17)
     add_library(tomlc17 STATIC
             "${tomlc17_SOURCE_DIR}/src/tomlc17.c"
     )
     target_include_directories(tomlc17 PUBLIC
             "${tomlc17_SOURCE_DIR}/src"
     )
-endif()
+endif ()
 
 string(TIMESTAMP CURRENT_DATE "%Y-%m-%d")
 configure_file(
@@ -45,9 +45,9 @@ configure_file(
         "${PROJECT_BINARY_DIR}/config.h"
 )
 
-if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
+if (NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
     message(FATAL_ERROR "This project requires GCC (GNU C compiler).")
-endif()
+endif ()
 
 add_compile_definitions(_GNU_SOURCE)
 

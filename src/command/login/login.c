@@ -35,8 +35,7 @@ static int getprofile(void) {
     return -1;
   }
 
-  curl_easy_setopt(curl, CURLOPT_URL,
-                   "https://api.minecraftservices.com/minecraft/profile");
+  curl_easy_setopt(curl, CURLOPT_URL,"https://api.minecraftservices.com/minecraft/profile");
   struct curl_slist *headers = NULL;
   char *auth_header = NULL;
 

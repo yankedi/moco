@@ -2,6 +2,7 @@
 
 `moco` 是一个用 C 编写的 Minecraft 启动器/管理工具，提供初始化、登录、安装、更新、搜索和启动游戏等基础命令。
 目前处于早期开发阶段，功能和稳定性可能有限，但目标是成为一个轻量级、跨平台的 Minecraft 命令行启动器解决方案。
+
 ## 依赖
 
 ### 系统依赖
@@ -27,7 +28,6 @@
 cmake -S . -B cmake-build-debug-event-trace -DCMAKE_BUILD_TYPE=Debug
 cmake --build cmake-build-debug-event-trace -j4
 ```
-
 
 ## 使用
 

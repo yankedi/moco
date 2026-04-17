@@ -5,6 +5,7 @@
 #include "start.h"
 #include "cjson/cJSON.h"
 #include "command/install/install.h"
+#include "command/login/oauth2.h"
 #include "config.h"
 #include "interface.h"
 #include "m_exit.h"
@@ -14,9 +15,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <sysexits.h>
 #include <unistd.h>
-#include <sys/wait.h>
 
 static toml_result_t result;
 static toml_result_t account_r;
@@ -31,21 +32,27 @@ char *jvm;
 char *mainClass;
 char *command;
 
-// char *jvm_a;
 char *jvm_a_Xms;
 char *jvm_a_Xmx;
 
-m_string jvm_a[] = {{"${natives_directory}", NULL},
-                    {"${launcher_name}", NULL},
-                    {"${launcher_version}", NULL},
-                    {"${classpath}", NULL}};
+m_string jvm_a[] = {
+  {"${natives_directory}", NULL},
+  {"${launcher_name}", NULL},
+  {"${launcher_version}", NULL},
+  {"${classpath}", NULL}
+};
 
 m_string game_a[] = {
-    {"${auth_player_name}", NULL},  {"${version_name}", NULL},
-    {"${game_directory}", NULL},    {"${assets_root}", NULL},
-    {"${assets_index_name}", NULL}, {"${auth_uuid}", NULL},
-    {"${auth_access_token}", NULL}, {"${clientid}", NULL},
-    {"${auth_xuid}", NULL},         {"${version_type}", NULL},
+  {"${auth_player_name}", NULL},
+  {"${version_name}", NULL},
+  {"${game_directory}", NULL},
+  {"${assets_root}", NULL},
+  {"${assets_index_name}", NULL},
+  {"${auth_uuid}", NULL},
+  {"${auth_access_token}", NULL},
+  {"${clientid}", NULL},
+  {"${auth_xuid}", NULL},
+  {"${version_type}", NULL}
 };
 
 static int analyze(void);
@@ -80,7 +87,7 @@ void start(void) {
   if (analyze() == 0) {
     printf("Starting Minecraft %s...\n", game_a[1].value);
     m_asprintf(&command, "%s %s %s %s", java_path, jvm, mainClass, game);
-    //printf("%s\n", command);
+    // printf("%s\n", command);
     setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 1);
     setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 1);
 
@@ -134,6 +141,8 @@ static int analyze(void) {
   if (access("instance.toml", F_OK) == 0) {
     if (access(".minecraft/versions/version.json", F_OK) == 0) {
       if (access(".moco/account.toml", F_OK) == 0) {
+        printf("Login...\n");
+        oauth2Refresh();
         jvm_a[0].value = m_strdup(".moco/natives");
         jvm_a[1].value = m_strdup("moco");
         jvm_a[2].value = m_strdup(MOCO_VERSION);
@@ -146,27 +155,17 @@ static int analyze(void) {
         toml_datum_t profile_root = profile_r.toptab;
         game_a[0].value = m_strdup(toml_seek(profile_root, "profile.name").u.s);
         version_json = file_to_json(".minecraft/versions/version.json");
-        game_a[1].value = m_strdup(
-            cJSON_GetObjectItemCaseSensitive(version_json, "id")->valuestring);
-        game_a[4].value =
-            m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "assets")
-                         ->valuestring);
-        mainClass =
-            m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "mainClass")
-                         ->valuestring);
+        game_a[1].value = m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "id")->valuestring);
+        game_a[4].value = m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "assets")->valuestring);
+        mainClass = m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "mainClass")->valuestring);
         game_a[5].value = m_strdup(toml_seek(profile_root, "profile.id").u.s);
         account_r = toml_parse_file_ex(".moco/account.toml");
         toml_datum_t account_root = account_r.toptab;
-        game_a[6].value =
-            m_strdup(toml_seek(account_root, "account.minecraft_token").u.s);
+        game_a[6].value = m_strdup(toml_seek(account_root, "account.minecraft_token").u.s);
         game_a[8].value = m_strdup(toml_seek(account_root, "account.uhs").u.s);
-        game_a[9].value =
-            m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "type")
-                         ->valuestring);
-        cJSON *version_arguments_json =
-            cJSON_GetObjectItemCaseSensitive(version_json, "arguments");
-        cJSON *version_arguments_game_json =
-            cJSON_GetObjectItemCaseSensitive(version_arguments_json, "game");
+        game_a[9].value = m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "type")->valuestring);
+        cJSON *version_arguments_json = cJSON_GetObjectItemCaseSensitive(version_json, "arguments");
+        cJSON *version_arguments_game_json = cJSON_GetObjectItemCaseSensitive(version_arguments_json, "game");
         // game
         cJSON *item;
         char *pre, *tmp, flag;
@@ -191,10 +190,8 @@ static int analyze(void) {
             }
           }
         }
-        cJSON *version_arguments_jvm_json =
-            cJSON_GetObjectItemCaseSensitive(version_arguments_json, "jvm");
-        cJSON *libraries_res =
-            cJSON_GetObjectItemCaseSensitive(version_json, "libraries");
+        cJSON *version_arguments_jvm_json = cJSON_GetObjectItemCaseSensitive(version_arguments_json, "jvm");
+        cJSON *libraries_res = cJSON_GetObjectItemCaseSensitive(version_json, "libraries");
         // classpath
         cJSON_ArrayForEach(item, libraries_res) {
           flag = 1;
@@ -206,23 +203,18 @@ static int analyze(void) {
             if (strcmp(os_name_res->valuestring, "linux") != 0)
               flag = 0;
           if (flag) {
-            cJSON *downloads_res =
-                cJSON_GetObjectItemCaseSensitive(item, "downloads");
-            cJSON *artifact_res =
-                cJSON_GetObjectItemCaseSensitive(downloads_res, "artifact");
-            cJSON *path_res =
-                cJSON_GetObjectItemCaseSensitive(artifact_res, "path");
+            cJSON *downloads_res = cJSON_GetObjectItemCaseSensitive(item, "downloads");
+            cJSON *artifact_res = cJSON_GetObjectItemCaseSensitive(downloads_res, "artifact");
+            cJSON *path_res = cJSON_GetObjectItemCaseSensitive(artifact_res, "path");
             pre = jvm_a[3].value;
-            m_asprintf(&tmp, "%s:.minecraft/libraries/%s", jvm_a[3].value,
-                       path_res->valuestring);
+            m_asprintf(&tmp, "%s:.minecraft/libraries/%s", jvm_a[3].value, path_res->valuestring);
             free(pre);
             jvm_a[3].value = tmp;
             tmp = NULL;
           }
         }
         pre = jvm_a[3].value;
-        m_asprintf(&tmp, "%s:.minecraft/versions/version/version.jar",
-                   jvm_a[3].value);
+        m_asprintf(&tmp, "%s:.minecraft/versions/version/version.jar", jvm_a[3].value);
         free(pre);
         jvm_a[3].value = tmp;
         tmp = NULL;
@@ -248,26 +240,20 @@ static int analyze(void) {
         // java_path
         instance_r = toml_parse_file_ex("instance.toml");
         toml_datum_t instance_root = instance_r.toptab;
-        toml_datum_t java_path_res =
-            toml_seek(instance_root, "launch.java_path");
+        toml_datum_t java_path_res = toml_seek(instance_root, "launch.java_path");
         if (java_path_res.type != TOML_UNKNOWN) {
           java_path = m_strdup(java_path_res.u.s);
+        } else if (access(".moco/java/bin/java", F_OK) == 0 || download_java() == 0) {
+          java_path = m_strdup(".moco/java/bin/java");
         } else {
-          if (access(".moco/java/bin/java", F_OK) == 0 ||
-              download_java() == 0) {
-            java_path = m_strdup(".moco/java/bin/java");
-          } else {
-            return 1;
-          }
+          return 1;
         }
       } else {
-        fprintf(stderr, "Error: .moco/account.toml not found.\n"
-                        "Please run 'moco login' first.\n");
+        fprintf(stderr, "Error: .moco/account.toml not found.\nPlease run 'moco login' first.\n");
         return 1;
       }
     } else {
-      fprintf(stderr, "Error: version.json not found.\n"
-                      "Please run 'moco install' first.\n");
+      fprintf(stderr, "Error: version.json not found.\nPlease run 'moco install' first.\n");
       return 1;
     }
   } else {

@@ -61,9 +61,7 @@ int curl_post(const char *url, const char *post_fields, char **response_body) {
   long http_code = 0;
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
   if (res != CURLE_OK) {
-    fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
-
+    fprintf(stderr, "curl_easy_perform() failed: %s\n",curl_easy_strerror(res));
     curl_easy_cleanup(curl);
     free(chunk.memory);
     return -1;
