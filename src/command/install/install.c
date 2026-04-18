@@ -54,7 +54,18 @@ static int analyze(void) {
 
 static void installVersion() {
   printf("[Install] 获取版本元数据: %s\n", version.u.s);
-  package *version_pkg = get_version(version.u.s);
+  //package *version_pkg = get_version(version.u.s);
+  SearchResult *version_search_result = search_version(version.u.s);
+  if (version_search_result->count != 1) {
+    fprintf(stderr, "Error: Version %s non-exact match\n", version.u.s);
+    m_exit(EX_DATAERR);
+  }
+  package *version_pkg = m_malloc(sizeof(package));
+  version_pkg->url = m_strdup(cJSON_GetObjectItemCaseSensitive(version_search_result->node[0], "url")->valuestring);
+  version_pkg->sha1 = m_strdup(cJSON_GetObjectItemCaseSensitive(version_search_result->node[0], "sha1")->valuestring);
+  version_pkg->path = m_strdup(".minecraft/versions/version.json");
+  version_pkg->store = get_store_path(version_pkg->sha1);
+  free_SearchResult(version_search_result);
   submit_download_task(version_pkg);
   wait_download_task(version_pkg->store);
 

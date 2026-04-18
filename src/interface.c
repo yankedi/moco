@@ -26,3 +26,11 @@ void free_package(package *p) {
     free(p);
   }
 }
+
+void free_SearchResult(SearchResult *result) {
+  for (int i = 0;i < result->count;++i) {
+    cJSON_Delete(result->node[i]);
+  }
+  free(result->node);
+  free(result);
+}
