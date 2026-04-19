@@ -30,10 +30,10 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_TOMLC17=/tmp/tomlc17 \
             -DFETCHCONTENT_SOURCE_DIR_CJSON=/tmp/cjson
       - name: 'Qodana Scan'
-        uses: JetBrains/qodana-action@v2026.1.0
+        uses: JetBrains/qodana-action@v2025.3.2
         with:
           pr-mode: false
-          args: --compile-commands,./build/compile_commands.json
+          args: --image,jetbrains/qodana-clang:2026.1-eap,--compile-commands,./build/compile_commands.json
         env:
           QODANA_TOKEN: ${{ secrets.QODANA_TOKEN_1619883240 }}
           QODANA_ENDPOINT: 'https://qodana.cloud'
