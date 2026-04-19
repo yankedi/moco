@@ -22,7 +22,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang clang-tidy libcurl4-openssl-dev libssl-dev
+          sudo apt-get install -y cmake gcc clang clang-tidy libcurl4-openssl-dev libssl-dev
       - name: Generate compile_commands.json
         run: |
           git clone https://github.com/cktan/tomlc17.git /tmp/tomlc17
