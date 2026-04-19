@@ -32,6 +32,7 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DFETCHCONTENT_SOURCE_DIR_TOMLC17=/tmp/tomlc17 \
             -DFETCHCONTENT_SOURCE_DIR_CJSON=/tmp/cjson
+          sed -i 's|/usr/bin/gcc|/usr/bin/clang|g' build/compile_commands.json
       - name: 'Qodana Scan'
         uses: JetBrains/qodana-action@v2025.3.2
         with:
