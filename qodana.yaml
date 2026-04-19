@@ -1,9 +1,8 @@
 ####################################################################################################################
 # WARNING: Do not store sensitive information in this file, as its contents will be included in the Qodana report. #
 ####################################################################################################################
-
-version: "1.0"
-linter: jetbrains/qodana-clang:2026.1-eap
+version: '1.0'
+linter: 'jetbrains/qodana-clang:2026.1-eap'
 bootstrap: |
   set -eux
   sudo apt-get update -y
@@ -11,3 +10,137 @@ bootstrap: |
   cmake -S . -B build \
     -DCMAKE_C_COMPILER=clang \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+exclude:
+  - name: llvmlibc-callee-namespace
+  - name: llvmlibc-implementation-in-namespace
+  - name: llvmlibc-inline-function-decl
+  - name: llvmlibc-restrict-system-libc-headers
+  - name: cppcoreguidelines-avoid-c-arrays
+  - name: cppcoreguidelines-avoid-capturing-lambda-coroutines
+  - name: cppcoreguidelines-avoid-const-or-ref-data-members
+  - name: cppcoreguidelines-avoid-do-while
+  - name: cppcoreguidelines-avoid-goto
+  - name: cppcoreguidelines-avoid-magic-numbers
+  - name: cppcoreguidelines-avoid-non-const-global-variables
+  - name: cppcoreguidelines-avoid-reference-coroutine-parameters
+  - name: cppcoreguidelines-c-copy-assignment-signature
+  - name: cppcoreguidelines-explicit-virtual-functions
+  - name: cppcoreguidelines-init-variables
+  - name: cppcoreguidelines-interfaces-global-init
+  - name: cppcoreguidelines-macro-to-enum
+  - name: cppcoreguidelines-macro-usage
+  - name: cppcoreguidelines-misleading-capture-default-by-value
+  - name: cppcoreguidelines-missing-std-forward
+  - name: cppcoreguidelines-narrowing-conversions
+  - name: cppcoreguidelines-no-malloc
+  - name: cppcoreguidelines-no-suspend-with-lock
+  - name: cppcoreguidelines-noexcept-destructor
+  - name: cppcoreguidelines-noexcept-move-operations
+  - name: cppcoreguidelines-noexcept-swap
+  - name: cppcoreguidelines-non-private-member-variables-in-classes
+  - name: cppcoreguidelines-owning-memory
+  - name: cppcoreguidelines-prefer-member-initializer
+  - name: cppcoreguidelines-pro-bounds-array-to-pointer-decay
+  - name: cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+  - name: cppcoreguidelines-pro-bounds-constant-array-index
+  - name: cppcoreguidelines-pro-bounds-pointer-arithmetic
+  - name: cppcoreguidelines-pro-type-const-cast
+  - name: cppcoreguidelines-pro-type-cstyle-cast
+  - name: cppcoreguidelines-pro-type-member-init
+  - name: cppcoreguidelines-pro-type-reinterpret-cast
+  - name: cppcoreguidelines-pro-type-static-cast-downcast
+  - name: cppcoreguidelines-pro-type-union-access
+  - name: cppcoreguidelines-pro-type-vararg
+  - name: cppcoreguidelines-rvalue-reference-param-not-moved
+  - name: cppcoreguidelines-slicing
+  - name: cppcoreguidelines-special-member-functions
+  - name: cppcoreguidelines-use-default-member-init
+  - name: cppcoreguidelines-use-enum-class
+  - name: cppcoreguidelines-virtual-class-destructor
+  - name: altera-id-dependent-backward-branch
+  - name: altera-kernel-name-restriction
+  - name: altera-single-work-item-barrier
+  - name: altera-struct-pack-align
+  - name: altera-unroll-loops
+  - name: google-build-explicit-make-pair
+  - name: google-build-namespaces
+  - name: google-build-using-namespace
+  - name: google-default-arguments
+  - name: google-explicit-constructor
+  - name: google-global-names-in-headers
+  - name: google-objc-avoid-nsobject-new
+  - name: google-objc-avoid-throwing-exception
+  - name: google-objc-function-naming
+  - name: google-objc-global-variable-declaration
+  - name: google-readability-avoid-underscore-in-googletest-name
+  - name: google-readability-braces-around-statements
+  - name: google-readability-casting
+  - name: google-readability-function-size
+  - name: google-readability-namespace-comments
+  - name: google-readability-todo
+  - name: google-runtime-float
+  - name: google-runtime-int
+  - name: google-runtime-operator
+  - name: google-upgrade-googletest-case
+  - name: llvm-else-after-return
+  - name: llvm-header-guard
+  - name: llvm-include-order
+  - name: llvm-namespace-comment
+  - name: llvm-prefer-isa-or-dyn-cast-in-conditionals
+  - name: llvm-prefer-register-over-unsigned
+  - name: llvm-prefer-static-over-anonymous-namespace
+  - name: llvm-qualified-auto
+  - name: llvm-twine-local
+  - name: llvm-type-switch-case-types
+  - name: llvm-use-new-mlir-op-builder
+  - name: llvm-use-ranges
+  - name: llvm-use-vector-utils
+  - name: android-cloexec-accept
+  - name: android-cloexec-accept4
+  - name: android-cloexec-creat
+  - name: android-cloexec-dup
+  - name: android-cloexec-epoll-create
+  - name: android-cloexec-epoll-create1
+  - name: android-cloexec-fopen
+  - name: android-cloexec-inotify-init
+  - name: android-cloexec-inotify-init1
+  - name: android-cloexec-memfd-create
+  - name: android-cloexec-open
+  - name: android-cloexec-pipe
+  - name: android-cloexec-pipe2
+  - name: android-cloexec-socket
+  - name: android-comparison-in-temp-failure-retry
+  - name: hicpp-avoid-c-arrays
+  - name: hicpp-avoid-goto
+  - name: hicpp-braces-around-statements
+  - name: hicpp-deprecated-headers
+  - name: hicpp-exception-baseclass
+  - name: hicpp-explicit-conversions
+  - name: hicpp-function-size
+  - name: hicpp-ignored-remove-result
+  - name: hicpp-invalid-access-moved
+  - name: hicpp-member-init
+  - name: hicpp-move-const-arg
+  - name: hicpp-multiway-paths-covered
+  - name: hicpp-named-parameter
+  - name: hicpp-new-delete-operators
+  - name: hicpp-no-array-decay
+  - name: hicpp-no-assembler
+  - name: hicpp-no-malloc
+  - name: hicpp-noexcept-move
+  - name: hicpp-signed-bitwise
+  - name: hicpp-special-member-functions
+  - name: hicpp-static-assert
+  - name: hicpp-undelegated-constructor
+  - name: hicpp-uppercase-literal-suffix
+  - name: hicpp-use-auto
+  - name: hicpp-use-emplace
+  - name: hicpp-use-equals-default
+  - name: hicpp-use-equals-delete
+  - name: hicpp-use-noexcept
+  - name: hicpp-use-nullptr
+  - name: hicpp-use-override
+  - name: hicpp-vararg
+  - name: All
+    paths:
+      - build
