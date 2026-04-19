@@ -15,6 +15,7 @@ Checks: >
   -llvm-*,
   -llvmlibc-*
 WarningsAsErrors: ''
-HeaderFilterRegex: 'src/.*'
+HeaderFilterRegex: '^/data/project/src/.*'
+ExcludeHeaderFilterRegex: '^/data/project/build/.*'
 AnalyzeTemporaryDtors: false
 FormatStyle: none
