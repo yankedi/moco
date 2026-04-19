@@ -19,6 +19,16 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}  # to check out the actual pull request commit, not the merge commit
           fetch-depth: 0  # a full history is required for pull request analysis
+      - name: Install build dependencies
+        run: sudo apt-get install -y cmake libcurl4-openssl-dev
+      - name: Generate compile_commands.json
+        run: |
+          git clone https://github.com/cktan/tomlc17.git /tmp/tomlc17
+          git clone https://github.com/DaveGamble/cJSON.git /tmp/cjson
+          cmake -S . -B build \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DFETCHCONTENT_SOURCE_DIR_TOMLC17=/tmp/tomlc17 \
+            -DFETCHCONTENT_SOURCE_DIR_CJSON=/tmp/cjson
       - name: 'Qodana Scan'
         uses: JetBrains/qodana-action@v2025.3
         with:
