@@ -28,7 +28,7 @@ jobs:
           git clone https://github.com/cktan/tomlc17.git /tmp/tomlc17
           git clone https://github.com/DaveGamble/cJSON.git /tmp/cjson
           cmake -S . -B build \
-            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_C_COMPILER=gcc \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DFETCHCONTENT_SOURCE_DIR_TOMLC17=/tmp/tomlc17 \
             -DFETCHCONTENT_SOURCE_DIR_CJSON=/tmp/cjson
