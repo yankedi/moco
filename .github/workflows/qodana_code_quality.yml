@@ -19,33 +19,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake gcc clang clang-tidy libcurl4-openssl-dev libssl-dev
-      - name: Generate compile_commands.json
-        run: |
-          git clone https://github.com/cktan/tomlc17.git /tmp/tomlc17
-          git clone https://github.com/DaveGamble/cJSON.git /tmp/cjson
-          cmake -S . -B build \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DFETCHCONTENT_SOURCE_DIR_TOMLC17=/tmp/tomlc17 \
-            -DFETCHCONTENT_SOURCE_DIR_CJSON=/tmp/cjson
-          echo "=== compile_commands.json head ==="
-          head -50 build/compile_commands.json
       - name: 'Qodana Scan'
         uses: JetBrains/qodana-action@v2025.3.2
         with:
           pr-mode: false
-          args: --image,jetbrains/qodana-clang:2026.1-eap,--compile-commands,./build/compile_commands.json,--log-level,debug
         env:
           QODANA_TOKEN: ${{ secrets.QODANA_TOKEN_1619883240 }}
           QODANA_ENDPOINT: 'https://qodana.cloud'
-      - name: Upload Qodana logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qodana-logs
-          path: ${{ runner.temp }}/qodana/results/
-          retention-days: 3

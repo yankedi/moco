@@ -8,3 +8,10 @@ profile:
   name: qodana.recommended
 include:
   - name: CheckDependencyLicenses
+bootstrap: |
+  set -eux
+  sudo apt-get update -y
+  sudo apt-get install -y cmake libcurl4-openssl-dev libssl-dev
+  cmake -S . -B build \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
