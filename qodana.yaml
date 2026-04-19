@@ -144,3 +144,4 @@ exclude:
   - name: All
     paths:
       - build
+      - build/_deps
