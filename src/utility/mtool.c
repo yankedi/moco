@@ -11,7 +11,8 @@
 #include <sysexits.h>
 
 char *m_strdup(const char *s) {
-  if (s == NULL) return NULL;
+  if (s == NULL)
+    return NULL;
   char *dup = strdup(s);
   if (dup == NULL) {
     fprintf(stderr, "OOM！\n");
@@ -71,7 +72,8 @@ char *m_sha1(FILE *fp) {
 } // TODO 未理解原理
 
 char *m_replace(const char *target, const m_string str) {
-  if (!target || !str.key || !str.value) return NULL;
+  if (!target || !str.key || !str.value)
+    return NULL;
   char *pos = strstr(target, str.key);
   if (pos == NULL) {
     free(pos);

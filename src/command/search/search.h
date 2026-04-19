@@ -6,5 +6,7 @@
 #define MOCO_SEARCH_H
 #include "interface.h"
 extern void search(int argc, char *argv[]);
-extern package *get_version(const char *v);
+// extern package *get_version(const char *v);
+extern SearchResult *search_versions(const char *v);
+extern SearchResult *search_version(const char *v);
 #endif // MOCO_SEARCH_H

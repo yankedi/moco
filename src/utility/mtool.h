@@ -1,8 +1,8 @@
 #ifndef MOCO_MTOOL_H
 #define MOCO_MTOOL_H
+#include "interface.h"
 #include <stddef.h>
 #include <stdio.h>
-#include "interface.h"
 
 char *m_strdup(const char *s);
 int m_asprintf(char **strp, const char *fmt, ...);

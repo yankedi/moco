@@ -33,12 +33,88 @@ void search(int argc, char *argv[]) {
   char *subcommand = argv[optind];
   if (subcommand != NULL) {
     if (strcmp(subcommand, "version") == 0) {
-      package *version_tmp = get_version(argv[optind + 1]);
-      free_package(version_tmp);
+      SearchResult *result = search_versions(argv[optind + 1]);
+      free_SearchResult(result);
+      // package *version_tmp = get_version(argv[optind + 1]);
+      // free_package(version_tmp);
     }
   }
 }
 
+SearchResult *search_versions(const char *v) {
+  char *path = NULL;
+  m_asprintf(&path, "%s/version_manifest_v2.json", XDG_DATA_HOME);
+  cJSON *manifest = file_to_json(path);
+  free(path);
+  if (manifest == NULL) {
+    fprintf(stderr, "Please use the \"moco update\"command first.\n");
+    return NULL;
+  }
+  const cJSON *versions = cJSON_GetObjectItem(manifest, "versions");
+  const int versions_size = cJSON_GetArraySize(versions);
+  SearchResult *result = m_malloc(sizeof(SearchResult));
+  result->node = NULL;
+  result->count = 0;
+  for (int i = 0; i < versions_size; ++i) {
+    cJSON *version = cJSON_GetArrayItem(versions, i);
+    cJSON *id = cJSON_GetObjectItem(version, "id");
+    if (strstr(id->valuestring, v) != NULL) {
+        result->node = realloc(result->node, sizeof(cJSON *) * (result->count + 1));//TODO 自定义m_realloc函数
+        result->node[result->count] = cJSON_Duplicate(version, 1);
+        result->count++;
+    }
+  }
+  if (result->count != 0) {
+    for (int i = 0;i < result->count;++i) {
+      printf("version: %s\n", cJSON_GetObjectItemCaseSensitive(result->node[i], "id")->valuestring);
+      printf("type: %s\n", cJSON_GetObjectItemCaseSensitive(result->node[i], "type")->valuestring);
+      printf("release time: %s\n", cJSON_GetObjectItemCaseSensitive(result->node[i], "releaseTime")->valuestring);
+      printf("\n");
+    }
+    cJSON_Delete(manifest);
+    return result;
+  }
+  cJSON_Delete(manifest);
+  return NULL;
+}
+
+SearchResult *search_version(const char *v) {
+  char *path = NULL;
+  m_asprintf(&path, "%s/version_manifest_v2.json", XDG_DATA_HOME);
+  cJSON *manifest = file_to_json(path);
+  free(path);
+  if (manifest == NULL) {
+    fprintf(stderr, "Please use the \"moco update\"command first.\n");
+    return NULL;
+  }
+  const cJSON *versions = cJSON_GetObjectItem(manifest, "versions");
+  const int versions_size = cJSON_GetArraySize(versions);
+  SearchResult *result = m_malloc(sizeof(SearchResult));
+  result->node = NULL;
+  result->count = 0;
+  for (int i = 0; i < versions_size; ++i) {
+    cJSON *version = cJSON_GetArrayItem(versions, i);
+    cJSON *id = cJSON_GetObjectItem(version, "id");
+    if (strcmp(id->valuestring, v) == 0) {
+      result->node = realloc(result->node, sizeof(cJSON *) * (result->count + 1));
+      result->node[result->count] = cJSON_Duplicate(version, 1);
+      result->count++;
+      break;
+    }
+  }
+  if (result->count != 0) {
+    printf("version: %s\n", cJSON_GetObjectItemCaseSensitive(result->node[0], "id")->valuestring);
+    printf("type: %s\n", cJSON_GetObjectItemCaseSensitive(result->node[0], "type")->valuestring);
+    printf("release time: %s\n", cJSON_GetObjectItemCaseSensitive(result->node[0], "releaseTime")->valuestring);
+    printf("\n");
+    cJSON_Delete(manifest);
+    return result;
+  }
+  cJSON_Delete(manifest);
+  return NULL;
+}
+
+#if 0
 package *get_version(const char *v) {
   package *p = m_malloc(sizeof(package));
   p->url = NULL;
@@ -87,3 +163,4 @@ package *get_version(const char *v) {
   cJSON_Delete(manifest);
   return p;
 }
+#endif

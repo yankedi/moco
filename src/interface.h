@@ -1,6 +1,8 @@
 //
 // Created by root on 4/3/26.
 //
+#include "cjson/cJSON.h"
+
 #include <getopt.h>
 
 #ifndef MOCO_OPT_H
@@ -29,5 +31,11 @@ typedef struct {
   int fail;
 } t_result;
 
+typedef struct {
+  cJSON **node;
+  char count;
+} SearchResult;
+
 extern void free_package(package *p);
+extern void free_SearchResult(SearchResult *result);
 #endif // MOCO_OPT_H

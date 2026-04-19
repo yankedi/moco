@@ -5,7 +5,9 @@
 #include "oauth2.h"
 #include "command/init.h"
 #include "curl.h"
+#include "m_exit.h"
 #include "utility/mtool.h"
+#include "tomlc17.h"
 
 #include <cjson/cJSON.h>
 
@@ -15,7 +17,7 @@
 #include <unistd.h>
 
 static int deviceCode();
-static int accessToken();
+static int accessToken(const char *refresh_token_pre);
 static int XBL();
 static int XSTS();
 static int minecraftToken();
@@ -38,7 +40,7 @@ void oauth2Login(void) {
   }
   printf("Waiting for authorization...\n");
   while (1) {
-    int res = accessToken();
+    int res = accessToken("first login");
     if (res == 0) {
       printf("Login successful!\n");
       break;
@@ -100,14 +102,80 @@ void oauth2Login(void) {
   free(refresh_token);
   free(minecraft_token);
 }
+void oauth2Refresh(void) {
+  if (access(".moco/account.toml", F_OK) == 0) {
+    toml_result_t account_r = toml_parse_file_ex(".moco/account.toml");
+    if (!account_r.ok) {
+        fprintf(stderr, "Failed to parse account.toml: %s\n", account_r.errmsg);
+        exit(-1);
+    }
 
+    toml_datum_t account_root = account_r.toptab;
+    toml_datum_t refresh_token_res = toml_seek(account_root, "account.refresh_token");
+
+    if (refresh_token_res.type == TOML_STRING) {
+      char *old_refresh_token = m_strdup(refresh_token_res.u.s);
+      toml_free(account_r);
+
+      if (accessToken(old_refresh_token) == 0) {
+        free(old_refresh_token);
+        
+        if (XBL() != 0) {
+          fprintf(stderr, "Failed to get XBL token\n");
+          exit(-1);
+        }
+        free(access_token);
+
+        if (XSTS() != 0) {
+          fprintf(stderr, "Failed to get XSTS token\n");
+          exit(-1);
+        }
+        free(XBL_token);
+
+        if (minecraftToken() != 0) {
+          fprintf(stderr, "Failed to get Minecraft token\n");
+          exit(-1);
+        }
+        free(XSTS_token);
+
+        // 重新写入配置文件
+        FILE *fp = fopen(".moco/account.toml", "w");
+        if (fp != NULL) {
+            fprintf(fp, "[account]\n");
+            fprintf(fp, "username = \"%s\"\n", username);
+            fprintf(fp, "refresh_token = \"%s\"\n", refresh_token);
+            fprintf(fp, "minecraft_token = \"%s\"\n", minecraft_token);
+            fprintf(fp, "uhs = \"%s\"\n", uhs);
+            fclose(fp);
+        }
+
+        free(username);
+        free(uhs);
+        free(refresh_token);
+        free(minecraft_token);
+
+      } else {
+        free(old_refresh_token);
+        fprintf(stderr, "Session expired or network error. Please run 'moco login' again.\n");
+        remove(".moco/account.toml");
+        exit(-1);
+      }
+    } else {
+        toml_free(account_r);
+        fprintf(stderr, "No refresh token found. Please run 'moco login' first.\n");
+        exit(-1);
+    }
+  } else {
+    fprintf(stderr, "No account found. Please run 'moco login' first.\n");
+    exit(-1);
+  }
+}
 static int deviceCode() {
   const char *post_fields = "client_id=7ad33f37-472e-431d-af07-c1cf8cb0ff88&"
                             "scope=XboxLive.signin offline_access";
   char *response_body = NULL;
 
-  if (curl_post(
-          "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode",
+  if (curl_post("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode",
           post_fields, &response_body) != 0) {
     return -1;
   }
@@ -123,10 +191,8 @@ static int deviceCode() {
     return -1;
   }
 
-  cJSON *user_code_res =
-      cJSON_GetObjectItemCaseSensitive(response, "user_code");
-  cJSON *device_code_res =
-      cJSON_GetObjectItemCaseSensitive(response, "device_code");
+  cJSON *user_code_res = cJSON_GetObjectItemCaseSensitive(response, "user_code");
+  cJSON *device_code_res = cJSON_GetObjectItemCaseSensitive(response, "device_code");
   cJSON *interval_res = cJSON_GetObjectItemCaseSensitive(response, "interval");
 
   if (!cJSON_IsString(user_code_res) || !cJSON_IsString(device_code_res)) {
@@ -169,15 +235,21 @@ static int deviceCode() {
   return 0;
 }
 
-static int accessToken() {
+static int accessToken(const char *refresh_token_pre) {
   char *post_fields = NULL;
   char *response_body = NULL;
-
+  if (strcmp(refresh_token_pre, "first login") == 0)
   m_asprintf(
       &post_fields,
       "grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id="
       "7ad33f37-472e-431d-af07-c1cf8cb0ff88&device_code=%s",
       device_code);
+  else m_asprintf(&post_fields,
+             "client_id=7ad33f37-472e-431d-af07-c1cf8cb0ff88"
+             "&grant_type=refresh_token"
+             "&refresh_token=%s"
+             "&scope=XboxLive.signin%%20offline_access",
+             refresh_token_pre);
 
   if (curl_post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
                 post_fields, &response_body) != 0) {
@@ -207,10 +279,8 @@ static int accessToken() {
     return -1;
   }
 
-  cJSON *access_token_res =
-      cJSON_GetObjectItemCaseSensitive(response, "access_token");
-  cJSON *refresh_token_res =
-      cJSON_GetObjectItemCaseSensitive(response, "refresh_token");
+  cJSON *access_token_res = cJSON_GetObjectItemCaseSensitive(response, "access_token");
+  cJSON *refresh_token_res = cJSON_GetObjectItemCaseSensitive(response, "refresh_token");
 
   if (!cJSON_IsString(access_token_res) || !cJSON_IsString(refresh_token_res)) {
     char *raw_error = cJSON_Print(response);
