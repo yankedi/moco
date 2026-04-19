@@ -6,7 +6,14 @@ Checks: >
   misc-*,
   performance-*,
   portability-*,
-  readability-*
+  readability-*,
+  -altera-*,
+  -android-*,
+  -google-*,
+  -cppcoreguidelines-*,
+  -hicpp-*,
+  -llvm-*,
+  -llvmlibc-*
 WarningsAsErrors: ''
 HeaderFilterRegex: 'src/.*'
 AnalyzeTemporaryDtors: false
