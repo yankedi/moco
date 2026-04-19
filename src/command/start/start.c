@@ -18,6 +18,8 @@
 #include <sys/wait.h>
 #include <sysexits.h>
 #include <unistd.h>
+#include <time.h>
+#include <stdio.h>
 
 static toml_result_t result;
 static toml_result_t account_r;
@@ -29,6 +31,7 @@ cJSON *version_json;
 char *java_path;
 char *game;
 char *jvm;
+char *default_user_jvm;
 char *mainClass;
 char *command;
 
@@ -52,7 +55,8 @@ m_string game_a[] = {
   {"${auth_access_token}", NULL},
   {"${clientid}", NULL},
   {"${auth_xuid}", NULL},
-  {"${version_type}", NULL}
+  {"${version_type}", NULL},
+  {"${user_type}", NULL}
 };
 
 static int analyze(void);
@@ -62,12 +66,8 @@ static void to_free(void) {
   free(command);
   free(game);
   free(jvm);
+  free(default_user_jvm);
   free(mainClass);
-  java_path = NULL;
-  command = NULL;
-  game = NULL;
-  jvm = NULL;
-  mainClass = NULL;
   for (int i = 0; i < sizeof(jvm_a) / sizeof(m_string); ++i) {
     free(jvm_a[i].value);
     jvm_a[i].value = NULL;
@@ -84,10 +84,16 @@ static void to_free(void) {
 void start(void) {
   jvm = m_strdup("");
   game = m_strdup("");
+  default_user_jvm = m_strdup("");
   if (analyze() == 0) {
     printf("Starting Minecraft %s...\n", game_a[1].value);
+    if (default_user_jvm) {
+      char *pre = jvm;
+      m_asprintf(&jvm, "%s %s",default_user_jvm,pre);
+      free(pre);
+    }
     m_asprintf(&command, "%s %s %s %s", java_path, jvm, mainClass, game);
-    // printf("%s\n", command);
+    printf("start command:\n%s\n", command);
     setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 1);
     setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 1);
 
@@ -150,7 +156,7 @@ static int analyze(void) {
         game_a[2].value = m_strdup(".minecraft");
         game_a[3].value = m_strdup(".minecraft/assets");
         game_a[7].value = m_strdup("");
-
+        game_a[10].value = m_strdup("msa");
         profile_r = toml_parse_file_ex(".moco/profile.toml");
         toml_datum_t profile_root = profile_r.toptab;
         game_a[0].value = m_strdup(toml_seek(profile_root, "profile.name").u.s);
@@ -166,9 +172,33 @@ static int analyze(void) {
         game_a[9].value = m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "type")->valuestring);
         cJSON *version_arguments_json = cJSON_GetObjectItemCaseSensitive(version_json, "arguments");
         cJSON *version_arguments_game_json = cJSON_GetObjectItemCaseSensitive(version_arguments_json, "game");
-        // game
+        char *releaseTime = m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "releaseTime")->valuestring);
+
         cJSON *item;
         char *pre, *tmp, flag;
+        //default-user-jvm
+        const int MC_26_1_SNAPSHOT_1_TIME_YEAR = 2025;
+        //2025-12-16T12:42:29+00:00
+        int releaseTime_YEAR;
+        sscanf(releaseTime, "%d-", &releaseTime_YEAR);//TODO 自定义m_sscanf
+        printf("%d", releaseTime_YEAR);
+        if (releaseTime_YEAR > MC_26_1_SNAPSHOT_1_TIME_YEAR
+          || strcmp("2025-12-16T12:42:29+00:00", releaseTime) == 0
+          ) {
+          cJSON *default_user_jvm_json = cJSON_GetObjectItemCaseSensitive(version_arguments_json, "default-user-jvm");
+          cJSON *default_user_jvm_value_res = cJSON_GetArrayItem(default_user_jvm_json, 0);
+          cJSON *default_user_jvm_value_json = cJSON_GetObjectItemCaseSensitive(default_user_jvm_value_res, "value");
+          cJSON_ArrayForEach(item,default_user_jvm_value_json) {
+            if (item->type == cJSON_String) {
+              pre = default_user_jvm;
+              m_asprintf(&tmp, "%s %s", pre, item->valuestring);
+              free(pre);
+              default_user_jvm = tmp;
+            }
+          }
+        }
+        free(releaseTime);
+        // game
         cJSON_ArrayForEach(item, version_arguments_game_json) {
           if (item->type == cJSON_String) {
             flag = 1;
