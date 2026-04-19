@@ -45,8 +45,10 @@ configure_file(
         "${PROJECT_BINARY_DIR}/config.h"
 )
 
-if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    message(FATAL_ERROR "This project requires GCC (GNU C compiler).")
+# Note: GCC is recommended for production builds.
+# Clang is also supported for static analysis (e.g. Qodana CI).
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "This project requires GCC or Clang.")
 endif()
 
 add_compile_definitions(_GNU_SOURCE)
