@@ -8,28 +8,30 @@ set(CMAKE_C_EXTENSIONS ON)
 
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 include(FetchContent)
 
-# Force cJSON to be built as static for direct linkage into moco.
 set(CJSON_OVERRIDE_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 set(CJSON_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
 
+set(TOMLC17_REPO "https://github.com/cktan/tomlc17.git" CACHE STRING "tomlc17 Git repository URL")
+set(CJSON_REPO "https://github.com/DaveGamble/cJSON.git" CACHE STRING "cJSON Git repository URL")
+
 FetchContent_Declare(
         tomlc17
-        GIT_REPOSITORY https://ghfast.top/https://github.com/cktan/tomlc17.git
+        GIT_REPOSITORY ${TOMLC17_REPO}
         GIT_TAG main
 )
 FetchContent_Declare(
         cjson
-        GIT_REPOSITORY https://ghfast.top/https://github.com/DaveGamble/cJSON.git
+        GIT_REPOSITORY ${CJSON_REPO}
         GIT_TAG master
 )
 
 FetchContent_MakeAvailable(tomlc17 cjson)
 
-# tomlc17 upstream has no CMake target; create one from fetched source.
 if (NOT TARGET tomlc17)
     add_library(tomlc17 STATIC
             "${tomlc17_SOURCE_DIR}/src/tomlc17.c"
@@ -45,8 +47,6 @@ configure_file(
         "${PROJECT_BINARY_DIR}/config.h"
 )
 
-# Note: GCC is recommended for production builds.
-# Clang is also supported for static analysis (e.g. Qodana CI).
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
     message(FATAL_ERROR "This project requires GCC or Clang.")
 endif()
@@ -72,20 +72,19 @@ add_executable(moco
         src/m_exit.c
         src/utility/mtool.c
         src/utility/download/m_epoll.c
-        src/utility/download/m_epoll.h
         src/command/start/start.c
-        src/command/start/start.h
 )
 
 target_link_libraries(moco PRIVATE
         CURL::libcurl
         cjson
         tomlc17
-        crypto
+        OpenSSL::Crypto
         Threads::Threads
 )
 
 target_include_directories(moco PRIVATE
-        "${PROJECT_SOURCE_DIR}/src"     # 源码目录
-        "${PROJECT_BINARY_DIR}"          # 包含生成的 config.h 的目录
+        "${PROJECT_SOURCE_DIR}/src"
+        "${PROJECT_BINARY_DIR}"
+        "${cjson_SOURCE_DIR}"   #wait https://github.com/DaveGamble/cJSON/issues/816 to fix the issue of cJSON_INCLUDE_DIRS not being set
 )

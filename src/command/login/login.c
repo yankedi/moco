@@ -4,7 +4,7 @@
 
 #include "login.h"
 
-#include "cjson/cJSON.h"
+#include "cJSON.h"
 #include "command/login/curl.h"
 #include "command/login/oauth2.h"
 #include "curl/curl.h"

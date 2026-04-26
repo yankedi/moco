@@ -9,7 +9,7 @@
 #include "utility/mtool.h"
 #include "tomlc17.h"
 
-#include <cjson/cJSON.h>
+#include "cJSON.h"
 
 #include <stdio.h>
 #include <stdlib.h>

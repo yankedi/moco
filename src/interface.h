@@ -1,7 +1,7 @@
 //
 // Created by root on 4/3/26.
 //
-#include "cjson/cJSON.h"
+#include "cJSON.h"
 
 #include <getopt.h>
 

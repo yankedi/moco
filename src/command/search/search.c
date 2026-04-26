@@ -3,7 +3,7 @@
 //
 
 #include "search.h"
-#include "_deps/cjson-src/cJSON.h"
+#include "cJSON.h"
 #include "env.h"
 #include "interface.h"
 #include "utility/file/json.h"
@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <getopt.h>
 
 void search(int argc, char *argv[]) {
   int opt;

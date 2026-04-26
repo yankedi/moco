@@ -3,7 +3,7 @@
 //
 
 #include "start.h"
-#include "cjson/cJSON.h"
+#include "cJSON.h"
 #include "command/install/install.h"
 #include "command/login/oauth2.h"
 #include "config.h"

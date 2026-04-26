@@ -4,7 +4,7 @@
 
 #include "install.h"
 
-#include "cjson/cJSON.h"
+#include "cJSON.h"
 #include "command/search/search.h"
 #include "m_exit.h"
 #include "tomlc17.h"
