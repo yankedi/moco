@@ -22,11 +22,10 @@
 
 ## 构建
 
-推荐在 Linux 下构建：
+暂时只支持在 Linux 下构建：
 
 ```bash
-cmake -S . -B cmake-build-debug-event-trace -DCMAKE_BUILD_TYPE=Debug
-cmake --build cmake-build-debug-event-trace -j4
+make clean && make build
 ```
 
 ## 使用
@@ -38,7 +37,7 @@ moco init
 moco login
 moco install
 moco update
-moco search <keyword>
+moco search version <verion>
 moco start
 ```
 
