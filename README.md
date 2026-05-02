@@ -10,6 +10,7 @@
 - GCC / GNU C 编译器
 - CMake 3.16+
 - `libcurl4-openssl-dev`
+- `libzip-dev`
 - `make` 或 Ninja（取决于你的构建生成器）
 - `Threads`、OpenSSL/`crypto` 相关系统库（通常由发行版提供）
 

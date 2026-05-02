@@ -9,6 +9,7 @@ set(CMAKE_C_EXTENSIONS ON)
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(libzip REQUIRED)
 
 include(FetchContent)
 
@@ -18,7 +19,6 @@ set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
 
 set(TOMLC17_REPO "https://github.com/cktan/tomlc17.git" CACHE STRING "tomlc17 Git repository URL")
 set(CJSON_REPO "https://github.com/DaveGamble/cJSON.git" CACHE STRING "cJSON Git repository URL")
-
 FetchContent_Declare(
         tomlc17
         GIT_REPOSITORY ${TOMLC17_REPO}
@@ -73,6 +73,11 @@ add_executable(moco
         src/utility/mtool.c
         src/utility/download/m_epoll.c
         src/command/start/start.c
+        src/command/import/import.c
+        src/command/import/import.c
+        src/command/import/import.h
+        src/utility/file/zip.c
+        src/utility/file/zip.h
 )
 
 target_link_libraries(moco PRIVATE
@@ -81,6 +86,7 @@ target_link_libraries(moco PRIVATE
         tomlc17
         OpenSSL::Crypto
         Threads::Threads
+        libzip::zip
 )
 
 target_include_directories(moco PRIVATE

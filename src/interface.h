@@ -9,6 +9,7 @@
 #define MOCO_OPT_H
 extern struct option cli_options[];
 extern struct option search_options[];
+extern struct option import_options[];
 typedef struct {
   const char *const key;
   char *value;

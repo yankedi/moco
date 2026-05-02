@@ -9,6 +9,7 @@
 #include "command/search/search.h"
 #include "command/start/start.h"
 #include "command/update/update.h"
+#include "command/import/import.h"
 #include "env.h"
 #include "interface.h"
 #include "m_exit.h"
@@ -56,6 +57,9 @@ int main(int argc, char *argv[]) {
     }
     if (strcmp(subcommand, "start") == 0) {
       start();
+    }
+    if (strcmp(subcommand,"import") == 0) {
+      import(argc - optind, argv + optind);
     }
   }
   m_exit(EXIT_SUCCESS);

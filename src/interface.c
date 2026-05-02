@@ -13,6 +13,11 @@ struct option search_options[] = {{"help", no_argument, NULL, 'h'},
                                   {"version", required_argument, NULL, 'v'},
                                   {0, 0, 0, 0}};
 
+struct option import_options[] = {
+  {"help",no_argument,NULL,'h'},
+  {0,0,0,0}
+};
+
 void free_package(package *p) {
   if (p) {
     if (p->path)
