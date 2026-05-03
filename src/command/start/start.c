@@ -12,14 +12,15 @@
 #include "tomlc17.h"
 #include "utility/file/json.h"
 #include "utility/mtool.h"
+#include "utility/store/store.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <sysexits.h>
-#include <unistd.h>
 #include <time.h>
-#include <stdio.h>
+#include <unistd.h>
 
 static toml_result_t result;
 static toml_result_t account_r;
@@ -29,11 +30,13 @@ static toml_result_t instance_r;
 cJSON *version_json;
 
 char *java_path;
-char *game;
-char *jvm;
-char *default_user_jvm;
+char **jvm_args;
+int jvm_count;
+char **game_args;
+int game_count;
+char **duj_args;
+int duj_count;
 char *mainClass;
-char *command;
 
 char *jvm_a_Xms;
 char *jvm_a_Xmx;
@@ -63,10 +66,12 @@ static int analyze(void);
 
 static void to_free(void) {
   free(java_path);
-  free(command);
-  free(game);
-  free(jvm);
-  free(default_user_jvm);
+  for (int i = 0; i < jvm_count; i++) free(jvm_args[i]);
+  free(jvm_args);
+  for (int i = 0; i < game_count; i++) free(game_args[i]);
+  free(game_args);
+  for (int i = 0; i < duj_count; i++) free(duj_args[i]);
+  free(duj_args);
   free(mainClass);
   for (int i = 0; i < sizeof(jvm_a) / sizeof(m_string); ++i) {
     free(jvm_a[i].value);
@@ -82,34 +87,38 @@ static void to_free(void) {
   cJSON_Delete(version_json);
 }
 void start(void) {
-  jvm = m_strdup("");
-  game = m_strdup("");
-  default_user_jvm = m_strdup("");
+  jvm_args = NULL;
+  jvm_count = 0;
+  game_args = NULL;
+  game_count = 0;
+  duj_args = NULL;
+  duj_count = 0;
   if (analyze() == 0) {
     printf("Starting Minecraft %s...\n", game_a[1].value);
-    if (default_user_jvm) {
-      char *pre = jvm;
-      m_asprintf(&jvm, "%s %s",default_user_jvm,pre);
-      free(pre);
+    if (duj_count > 0) {
+      int new_count = jvm_count + duj_count;
+      jvm_args = realloc(jvm_args, new_count * sizeof(char *));
+      if (!jvm_args) { perror("realloc"); exit(EX_OSERR); }
+      memmove(jvm_args + duj_count, jvm_args, jvm_count * sizeof(char *));
+      for (int i = 0; i < duj_count; i++)
+        jvm_args[i] = duj_args[i];
+      jvm_count = new_count;
+      free(duj_args);
+      duj_args = NULL;
+      duj_count = 0;
     }
-    m_asprintf(&command, "%s %s %s %s", java_path, jvm, mainClass, game);
-    printf("start command:\n%s\n", command);
+    int total = 1 + jvm_count + 1 + game_count;
+    char **args = malloc((total + 1) * sizeof(char *));
+    int arg_count = 0;
+    args[arg_count++] = java_path;
+    for (int i = 0; i < jvm_count; i++) args[arg_count++] = jvm_args[i];
+    args[arg_count++] = mainClass;
+    for (int i = 0; i < game_count; i++) args[arg_count++] = game_args[i];
+    args[arg_count] = NULL;
+    printf("start command:\n");
+    for (int i = 0; i < arg_count; i++) printf("  [%d] %s\n", i, args[i]);
     setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 1);
     setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 1);
-
-    int max_args = 1024;
-    char **args = malloc(max_args * sizeof(char *));
-    int arg_count = 0;
-
-    args[arg_count++] = java_path;
-
-    strtok(command, " ");
-    char *token = strtok(NULL, " ");
-    while (token != NULL && arg_count < max_args - 1) {
-      args[arg_count++] = token;
-      token = strtok(NULL, " ");
-    }
-    args[arg_count] = NULL;
     pid_t pid = fork();
     if (pid == -1) {
       // fork 失败
@@ -143,7 +152,7 @@ void start(void) {
   }
 }
 
-static int analyze(void) {
+static int analyze(void) {//TODO 重构为反箭头格式为卫语句
   if (access("instance.toml", F_OK) == 0) {
     if (access(".minecraft/versions/version.json", F_OK) == 0) {
       if (access(".moco/account.toml", F_OK) == 0) {
@@ -190,10 +199,10 @@ static int analyze(void) {
           cJSON *default_user_jvm_value_json = cJSON_GetObjectItemCaseSensitive(default_user_jvm_value_res, "value");
           cJSON_ArrayForEach(item,default_user_jvm_value_json) {
             if (item->type == cJSON_String) {
-              pre = default_user_jvm;
-              m_asprintf(&tmp, "%s %s", pre, item->valuestring);
-              free(pre);
-              default_user_jvm = tmp;
+              duj_count++;
+              duj_args = realloc(duj_args, duj_count * sizeof(char *));
+              if (!duj_args) { perror("realloc"); exit(EX_OSERR); }
+              duj_args[duj_count - 1] = m_strdup(item->valuestring);
             }
           }
         }
@@ -204,19 +213,19 @@ static int analyze(void) {
             flag = 1;
             for (int i = 0; i < sizeof(game_a) / sizeof(m_string); ++i) {
               if (strcmp(item->valuestring, game_a[i].key) == 0) {
-                pre = game;
-                m_asprintf(&tmp, "%s %s", pre, game_a[i].value);
-                free(pre);
-                game = tmp;
+                game_count++;
+                game_args = realloc(game_args, game_count * sizeof(char *));
+                if (!game_args) { perror("realloc"); exit(EX_OSERR); }
+                game_args[game_count - 1] = m_strdup(game_a[i].value);
                 flag = 0;
                 break;
               }
             }
             if (flag) {
-              pre = game;
-              m_asprintf(&tmp, "%s %s", pre, item->valuestring);
-              free(pre);
-              game = tmp;
+              game_count++;
+              game_args = realloc(game_args, game_count * sizeof(char *));
+              if (!game_args) { perror("realloc"); exit(EX_OSERR); }
+              game_args[game_count - 1] = m_strdup(item->valuestring);
             }
           }
         }
@@ -243,11 +252,71 @@ static int analyze(void) {
             tmp = NULL;
           }
         }
+        // java_path
+        instance_r = toml_parse_file_ex("instance.toml");
+        toml_datum_t instance_root = instance_r.toptab;
+        toml_datum_t java_path_res = toml_seek(instance_root, "launch.java_path");
+        if (java_path_res.type != TOML_UNKNOWN) {
+          java_path = m_strdup(java_path_res.u.s);
+        } else if (access(".moco/java/bin/java", F_OK) == 0 || download_java() == 0) {
+          java_path = m_strdup(".moco/java/bin/java");
+        } else {
+          return 1;
+        }
+
+
+        toml_datum_t forge = toml_seek(instance_root, "dependencies.forge");
+        toml_datum_t neoforge = toml_seek(instance_root, "dependencies.neoforge");
+        toml_datum_t fabric_loader = toml_seek(instance_root, "dependencies.fabric-loader");
+        toml_datum_t quilt_loader = toml_seek(instance_root, "dependencies.quilt-loader");
+        //TODO 应写为只允许加载一个
+        if (forge.type == TOML_STRING) {
+          printf("Forge modloader detected: %s\n", forge.u.s);
+        }
+        if (neoforge.type == TOML_STRING) {
+          printf("NeoForge modloader detected: %s\n", neoforge.u.s);
+        }
+        if (fabric_loader.type == TOML_STRING) {
+          printf("Fabric Loader modloader detected: %s\n", fabric_loader.u.s);
+          char *fabric_loader_json_path;
+          m_asprintf(&fabric_loader_json_path,".minecraft/versions/fabric-loader-%s-%s.json",fabric_loader.u.s,game_a[1].value);
+          cJSON *fabric_loader_json = file_to_json(fabric_loader_json_path);
+          free(fabric_loader_json_path);
+          cJSON *fabric_libraries_res = cJSON_GetObjectItemCaseSensitive(fabric_loader_json, "libraries");
+          cJSON_ArrayForEach(item,fabric_libraries_res) {
+            char *name = reMaven(cJSON_GetObjectItemCaseSensitive(item, "name")->valuestring);
+            pre = jvm_a[3].value;
+            m_asprintf(&tmp,"%s:.minecraft/libraries/%s", jvm_a[3].value, name);
+            free(pre);
+            free(name);
+            jvm_a[3].value = tmp;
+            tmp = NULL;
+          }
+
+          free(mainClass);
+          mainClass = m_strdup(cJSON_GetObjectItemCaseSensitive(fabric_loader_json, "mainClass")->valuestring);
+
+          cJSON *fabric_jvm_res = cJSON_GetObjectItemCaseSensitive(
+            cJSON_GetObjectItemCaseSensitive(fabric_loader_json,"arguments"), "jvm");
+          cJSON_ArrayForEach(item,fabric_jvm_res) {
+            jvm_count++;
+            jvm_args = realloc(jvm_args, jvm_count * sizeof(char *));
+            if (!jvm_args) { perror("realloc"); exit(EX_OSERR); }
+            jvm_args[jvm_count - 1] = m_strdup(item->valuestring);
+          }
+
+          cJSON_Delete(fabric_loader_json);
+        }
+        if (quilt_loader.type == TOML_STRING) {
+          printf("Quilt Loader modloader detected: %s\n", quilt_loader.u.s);
+        }
+
         pre = jvm_a[3].value;
         m_asprintf(&tmp, "%s:.minecraft/versions/version/version.jar", jvm_a[3].value);
         free(pre);
         jvm_a[3].value = tmp;
         tmp = NULL;
+
         // jvm
         cJSON_ArrayForEach(item, version_arguments_jvm_json) {
           if (item->type == cJSON_String) {
@@ -260,24 +329,13 @@ static int analyze(void) {
               }
             }
 
-            pre = jvm;
-            m_asprintf(&tmp, "%s %s", pre, resolved);
-            free(pre);
-            free(resolved);
-            jvm = tmp;
+            jvm_count++;
+            jvm_args = realloc(jvm_args, jvm_count * sizeof(char *));
+            if (!jvm_args) { perror("realloc"); exit(EX_OSERR); }
+            jvm_args[jvm_count - 1] = resolved;
           }
         }
-        // java_path
-        instance_r = toml_parse_file_ex("instance.toml");
-        toml_datum_t instance_root = instance_r.toptab;
-        toml_datum_t java_path_res = toml_seek(instance_root, "launch.java_path");
-        if (java_path_res.type != TOML_UNKNOWN) {
-          java_path = m_strdup(java_path_res.u.s);
-        } else if (access(".moco/java/bin/java", F_OK) == 0 || download_java() == 0) {
-          java_path = m_strdup(".moco/java/bin/java");
-        } else {
-          return 1;
-        }
+
       } else {
         fprintf(stderr, "Error: .moco/account.toml not found.\nPlease run 'moco login' first.\n");
         return 1;

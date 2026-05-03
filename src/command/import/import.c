@@ -9,6 +9,7 @@
 #include "utility/file/zip.h"
 #include "utility/mtool.h"
 #include "utility/store/store.h"
+#include "zip.h"
 
 #include <bits/getopt_core.h>
 #include <stdio.h>
@@ -16,7 +17,6 @@
 #include <string.h>
 #include <sysexits.h>
 #include <unistd.h>
-#include <zip.h>
 
 void import(int argc, char *argv[]) {
   int opt;
@@ -53,17 +53,16 @@ void import(int argc, char *argv[]) {
       }else if (strcmp(p,"mrpack") == 0) {
         char *buffer = zip_get_file(subcommands, "modrinth.index.json");
         cJSON *json = cJSON_Parse(buffer);
+        free(buffer);
         int formatVersion = cJSON_GetObjectItemCaseSensitive(json, "formatVersion")->valueint;
         if (formatVersion != 1) {
           fprintf(stderr, "Unsupported formatVersion: %d\n", formatVersion);
-          free(buffer);
           cJSON_Delete(json);
           m_exit(EX_DATAERR);
         }
         char *game = cJSON_GetObjectItemCaseSensitive(json, "game")->valuestring;
         if (strcmp(game,"minecraft") != 0) {
           fprintf(stderr, "Unsupported game: %s\n", game);
-          free(buffer);
           cJSON_Delete(json);
           m_exit(EX_DATAERR);
         }
@@ -76,7 +75,6 @@ void import(int argc, char *argv[]) {
             remove("instance.toml");
           }else {
             free(line);
-            free(buffer);
             cJSON_Delete(json);
             m_exit(EXIT_SUCCESS);
           }
@@ -122,6 +120,25 @@ void import(int argc, char *argv[]) {
             free(path);
           }
         }
+        struct zip_t *zip = zip_open(subcommands,0,'r');
+
+        size_t total = zip_entries_total(zip);
+        for (int i = 0;i < total;++i) {
+          zip_entry_openbyindex(zip,i);
+          const char *name_f = zip_entry_name(zip);
+          if (strncmp(name_f,"overrides/",10) == 0) {
+            if (!zip_entry_isdir(zip)) {
+              char *path;
+              m_asprintf(&path,".minecraft/%s",name_f+10);
+              mkdirs(path,F);
+              zip_entry_fread(zip,path);
+              free(path);
+            }
+          }
+          zip_entry_close(zip);
+        }
+        zip_close(zip);
+
         fclose(file);
         cJSON_Delete(json);
       }else fprintf(stderr,"Unsupported file suffix: %s\n", p);
