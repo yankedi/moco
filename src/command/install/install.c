@@ -22,6 +22,8 @@ toml_result_t result;
 toml_datum_t root;
 toml_datum_t version;
 int total = 0;
+char has_dependencies = 1;
+char has_mods = 1;
 // const char *manifest_source;
 // const char *assets_source;
 
@@ -30,10 +32,14 @@ static int analyze(void);
 static void installVersion(void);
 static void download_asset(const package *assetIndex);
 static void download_libraries(const cJSON *version_json);
+static void installDependencies(void);
+static void installMods(void);
 
 void install(void) {
   if (analyze()) {
     installVersion();
+    installDependencies();
+    installMods();
   }
   toml_free(result);
 }
@@ -49,6 +55,10 @@ static int analyze(void) {
     fprintf(stderr, "The game version must be enclosed in quotation marks.\n");
     return 0;
   }
+  toml_datum_t dependencies = toml_seek(root, "dependencies");
+  if (dependencies.type == TOML_TABLE) has_dependencies = 0;
+  toml_datum_t mods = toml_seek(root, "mods");
+  if (mods.type == TOML_ARRAY) has_mods = 0;
   return 1;
 }
 
@@ -56,6 +66,11 @@ static void installVersion() {
   printf("[Install] 获取版本元数据: %s\n", version.u.s);
   //package *version_pkg = get_version(version.u.s);
   SearchResult *version_search_result = search_version(version.u.s);
+  if (version_search_result == NULL) {
+    fprintf(stderr, "Error: Version %s not found\n"
+                    "Check your instance.toml or run moco update", version.u.s);
+    m_exit(EX_DATAERR);
+  }
   if (version_search_result->count != 1) {
     fprintf(stderr, "Error: Version %s non-exact match\n", version.u.s);
     m_exit(EX_DATAERR);
@@ -234,4 +249,98 @@ int download_java() {
     return 1;
   }
   return 0;
+}
+
+void installDependencies() {
+  if (has_dependencies == 0) {
+    printf("[Install] 解析依赖项\n");
+    toml_datum_t forge = toml_seek(root, "dependencies.forge");
+    toml_datum_t neoforge = toml_seek(root, "dependencies.neoforge");
+    toml_datum_t fabric_loader = toml_seek(root, "dependencies.fabric-loader");
+    toml_datum_t quilt_loader = toml_seek(root, "dependencies.quilt-loader");
+    if (forge.type == TOML_STRING) {
+
+    }
+    if (neoforge.type == TOML_STRING) {
+
+    }
+    if (fabric_loader.type == TOML_STRING) {
+      printf("[Install] 提交 Fabric Loader 下载任务: %s\n", fabric_loader.u.s);
+      //  https://meta.fabricmc.net/v2/versions/loader/:game_version/:loader_version
+      package *fabric_loader_package = m_malloc(sizeof(package));
+      char *url;
+      m_asprintf(&url, "https://meta.fabricmc.net/v2/versions/loader/%s/%s/profile/json",version.u.s,fabric_loader.u.s);
+      char *path;
+      m_asprintf(&path,".minecraft/versions/fabric-loader-%s-%s.json",fabric_loader.u.s,version.u.s);
+      fabric_loader_package->path = path;
+      fabric_loader_package->sha1 = m_strdup("-1");
+      fabric_loader_package->url = url;
+      fabric_loader_package->store = m_strdup(path);
+      submit_download_task(fabric_loader_package);
+      wait_epoll_download_task();
+
+      cJSON *json = file_to_json(path);
+      free_package(fabric_loader_package);
+      char *inheritsFrom = cJSON_GetObjectItemCaseSensitive(json, "inheritsFrom")->valuestring;
+      if (strcmp(version.u.s,inheritsFrom) != 0) {
+        fprintf(stderr, "Error: Fabric Loader version %s does not match game version %s\n", fabric_loader.u.s, version.u.s);
+        cJSON_Delete(json);
+        m_exit(EX_DATAERR);
+      }
+      cJSON *libraries = cJSON_GetObjectItemCaseSensitive(json, "libraries");
+      cJSON *item;
+      package *libraries_package = m_malloc(sizeof(package));
+      cJSON_ArrayForEach(item,libraries) {
+        char *name = reMaven(cJSON_GetObjectItemCaseSensitive(item, "name")->valuestring);
+        char *path_l;
+        m_asprintf(&path_l, ".minecraft/libraries/%s", name);
+        char *url_l;
+        m_asprintf(&url_l,"https://maven.fabricmc.net/%s",name);
+        cJSON *sha1_l = cJSON_GetObjectItemCaseSensitive(item, "sha1");
+
+        libraries_package->path = path_l;
+        libraries_package->url = url_l;
+        if (sha1_l != NULL) {
+          libraries_package->sha1 = m_strdup(sha1_l->valuestring);
+          libraries_package->store = get_store_path(sha1_l->valuestring);
+        }else {
+          libraries_package->sha1 = m_strdup("-1");
+          libraries_package->store = m_strdup(path_l);
+        }
+
+        submit_download_task(libraries_package);
+        free(name);
+        free(libraries_package->path);
+        free(libraries_package->sha1);
+        free(libraries_package->url);
+        free(libraries_package->store);
+      }
+      free(libraries_package);
+      cJSON_Delete(json);
+    }
+    if (quilt_loader.type == TOML_STRING) {
+      printf("此加载器方式暂时被搁置");
+    }
+  }
+}
+
+void installMods() {
+  if (has_mods == 0) {
+    printf("[Install] 解析模组...\n");//TODO 重写cli输出
+    toml_datum_t mods = toml_seek(root, "mods");
+    package *mod_package = m_malloc(sizeof(package));
+    for (int i = 0; i < mods.u.arr.size; i++) {
+      toml_datum_t mod = mods.u.arr.elem[i];
+      mod_package->path = m_strdup(toml_get(mod,"path").u.s);
+      mod_package->sha1 = m_strdup(toml_get(mod,"sha1").u.s);
+      mod_package->url = m_strdup(toml_get(mod,"url").u.s);
+      mod_package->store = get_store_path(mod_package->sha1);
+      submit_download_task(mod_package);
+      free(mod_package->path);
+      free(mod_package->sha1);
+      free(mod_package->url);
+      free(mod_package->store);
+    }
+    free(mod_package);
+  }
 }

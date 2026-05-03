@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 
+//TODO 统一RETRY
 /**
  * Read the whole file at `path` into a newly allocated, NUL-terminated buffer.
  *

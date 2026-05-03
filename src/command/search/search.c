@@ -112,6 +112,7 @@ SearchResult *search_version(const char *v) {
     return result;
   }
   cJSON_Delete(manifest);
+  free(result);
   return NULL;
 }
 

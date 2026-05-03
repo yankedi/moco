@@ -10,7 +10,9 @@
 #include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 int toStore() { return 0; }
@@ -71,4 +73,28 @@ void mkdirs(const char *path, mkdir_mode mode) {
   }
   mkdir(path_c, 0755);
   free(path_c);
+}
+
+/**
+ *
+ * @param name 传入maven格式
+ * @return 返回一个栈字符串
+ */
+char *reMaven(const char *name) {
+  char *tmp = m_strdup(name);
+  char *token = strtok(tmp,":");
+  char *group_id = token;
+  token = strtok(NULL,":");
+  const char *artifact_id = token;
+  token = strtok(NULL,":");
+  const char *version = token;
+  char *p = group_id;
+  while (*p != '\0') {
+    if (*p == '.') *p = '/';
+    ++p;
+  }
+  char *path;
+  m_asprintf(&path,"%s/%s/%s/%s-%s.jar",group_id,artifact_id,version,artifact_id,version);
+  free(tmp);
+  return path;
 }

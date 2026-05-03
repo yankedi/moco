@@ -10,4 +10,5 @@ extern void mkdirs(const char *path, mkdir_mode mode);
 extern void link_mkdir(const char *store, const char *path);
 extern char *get_store_path(const char *sha1);
 extern char *get_tmp(const char *store);
+extern char *reMaven(const char *name);
 #endif // MOCO_STORE_H

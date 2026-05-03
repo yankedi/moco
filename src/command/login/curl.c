@@ -78,3 +78,22 @@ int curl_post(const char *url, const char *post_fields, char **response_body) {
   *response_body = chunk.memory;
   return 0;
 }
+//TODO 优化并提取整个文件到utility
+int curl_get(const char *url,char **response_body) {
+  CURL *curl = curl_easy_init();
+  struct MemoryBlock chunk = {.memory = m_malloc(1), .size = 0};
+  chunk.memory[0] = '\0';
+  curl_easy_setopt(curl,CURLOPT_URL,url);
+  curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,curl_callback);
+  curl_easy_setopt(curl,CURLOPT_WRITEDATA,&chunk);
+  curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,1L);
+  CURLcode res = curl_easy_perform(curl);
+  curl_easy_cleanup(curl);
+  if (res != CURLE_OK ) {
+    fprintf(stderr, "curl failed: %s\n",curl_easy_strerror(res));
+    free(chunk.memory);
+    return -1;
+  }
+  *response_body = chunk.memory;
+  return 0;
+}

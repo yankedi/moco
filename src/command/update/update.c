@@ -37,6 +37,7 @@ void update(void) {
   char *url = m_strdup(
       "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
   printf("Download version_manifest_v2.json ing....\n");
+  remove(manifest_path);
   package *manifest = m_malloc(sizeof(package));
   manifest->url = url;
   manifest->path = manifest_path;
@@ -44,7 +45,7 @@ void update(void) {
   manifest->store = m_strdup(manifest_path);
   submit_download_task(manifest);
   free_package(manifest);
-
+  wait_epoll_download_task();
   // testSource();
   // downloadInit();
 }
