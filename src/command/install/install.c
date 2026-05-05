@@ -32,6 +32,7 @@ static int analyze(void);
 static void installVersion(void);
 static void download_asset(const package *assetIndex);
 static void download_libraries(const cJSON *version_json);
+static int download_java();
 static void installDependencies(void);
 static void installMods(void);
 
@@ -259,7 +260,29 @@ void installDependencies() {
     toml_datum_t fabric_loader = toml_seek(root, "dependencies.fabric-loader");
     toml_datum_t quilt_loader = toml_seek(root, "dependencies.quilt-loader");
     if (forge.type == TOML_STRING) {
+      //https://maven.minecraftforge.net/net/minecraftforge/forge/{MC版本}-{Forge版本}/forge-{MC版本}-{Forge版本}-installer.jar
+      if (download_java()!=0) {
+        fprintf(stderr, "Error downloading Java runtime, cannot continue installing Forge\n");
+        m_exit(EX_IOERR);
+      }
+      package *forge_installer_package = m_malloc(sizeof(package));
+      forge_installer_package->path = m_strdup(".moco/forge-installer.jar");
+      forge_installer_package->sha1 = m_strdup("-1");
+      forge_installer_package->store = m_strdup(".moco/forge-installer.jar");
+      char *url;
+      m_asprintf(&url,"https://maven.minecraftforge.net/net/minecraftforge/forge/%s-%s/forge-%s-%s-installer.jar",
+        version.u.s,forge.u.s,version.u.s,forge.u.s);
+      forge_installer_package->url = url;
+      submit_download_task(forge_installer_package);
+      wait_epoll_download_task();
+      free_package(forge_installer_package);
 
+      FILE *file = fopen(".minecraft/launcher_profiles.json","wb+");
+      fprintf(file,"{\n"
+                   "\t\"profiles\":{}\n"
+                   "}");
+      fclose(file);
+      system(".moco/java/bin/java -jar .moco/forge-installer.jar --installClient .minecraft");
     }
     if (neoforge.type == TOML_STRING) {
 

@@ -91,6 +91,8 @@ static void to_free(void) {
     free(game_a[i].value);
     game_a[i].value = NULL;
   }
+  free(jvm_a_Xms);
+  free(jvm_a_Xmx);
   toml_free(instance_r);
   toml_free(profile_r);
   toml_free(account_r);
@@ -202,7 +204,9 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
           cJSON *default_user_jvm_value_res = cJSON_GetArrayItem(default_user_jvm_json, 0);
           cJSON *default_user_jvm_value_json = cJSON_GetObjectItemCaseSensitive(default_user_jvm_value_res, "value");
           cJSON_ArrayForEach(item,default_user_jvm_value_json) {
-            if (item->type == cJSON_String)
+            if (item->type == cJSON_String&&
+              strstr(item->valuestring,"Xms")==NULL&&
+              strstr(item->valuestring,"Xmx")==NULL)
               add_arg(&duj, item->valuestring);
           }
         }
@@ -250,7 +254,7 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
         toml_datum_t java_path_res = toml_seek(instance_root, "launch.java_path");
         if (java_path_res.type != TOML_UNKNOWN) {
           java_path = m_strdup(java_path_res.u.s);
-        } else if (access(".moco/java/bin/java", F_OK) == 0 || download_java() == 0) {
+        } else if (access(".moco/java/bin/java", F_OK) == 0) {
           java_path = m_strdup(".moco/java/bin/java");
         } else {
           return 1;
@@ -319,6 +323,10 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
             free(resolved);
           }
         }
+        m_asprintf(&jvm_a_Xms, "-Xms%s", toml_seek(instance_root,"launch.jvm_xms").u.s);
+        m_asprintf(&jvm_a_Xmx, "-Xmx%s", toml_seek(instance_root,"launch.jvm_xmx").u.s);
+        add_arg(&jvm, jvm_a_Xms);
+        add_arg(&jvm, jvm_a_Xmx);
 
       } else {
         fprintf(stderr, "Error: .moco/account.toml not found.\nPlease run 'moco login' first.\n");
