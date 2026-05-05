@@ -285,7 +285,28 @@ void installDependencies() {
       system(".moco/java/bin/java -jar .moco/forge-installer.jar --installClient .minecraft");
     }
     if (neoforge.type == TOML_STRING) {
-
+      if (strstr(version.u.s,"1.20.2")!=NULL || strstr(version.u.s,"1.20.3")!=NULL) {
+        fprintf(stderr,"Sorry,the neoforge 1.20.2/1.20.3 is too chaos,not be support\n");
+        m_exit(EX_DATAERR);
+      }
+      //https://maven.neoforged.net/releases/net/neoforged/neoforge/[NeoForge版本号]/neoforge-[NeoForge版本号]-installer.jar
+      download_java();
+      package *neoforge_installer_package = m_malloc(sizeof(package));
+      neoforge_installer_package->path = m_strdup(".moco/neoforge-installer.jar");
+      neoforge_installer_package->sha1 = m_strdup("-1");
+      neoforge_installer_package->store = m_strdup(".moco/neoforge-installer.jar");
+      char *url;
+      m_asprintf(&url,"https://maven.neoforged.net/releases/net/neoforged/neoforge/%s/neoforge-%s-installer.jar",neoforge.u.s,neoforge.u.s);
+      neoforge_installer_package->url = url;
+      submit_download_task(neoforge_installer_package);
+      wait_epoll_download_task();
+      free_package(neoforge_installer_package);
+      FILE *file = fopen(".minecraft/launcher_profiles.json","wb+");
+      fprintf(file,"{\n"
+                   "\t\"profiles\":{}\n"
+                   "}");
+      fclose(file);
+      system(".moco/java/bin/java -jar .moco/neoforge-installer.jar --installClient .minecraft");
     }
     if (fabric_loader.type == TOML_STRING) {
       printf("[Install] 提交 Fabric Loader 下载任务: %s\n", fabric_loader.u.s);
