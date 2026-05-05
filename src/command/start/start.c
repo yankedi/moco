@@ -30,13 +30,23 @@ static toml_result_t instance_r;
 cJSON *version_json;
 
 char *java_path;
-char **jvm_args;
-int jvm_count;
-char **game_args;
-int game_count;
-char **duj_args;
-int duj_count;
 char *mainClass;
+
+struct start_args {
+  char **value;
+  int count;
+};
+
+static void add_arg(struct start_args *args, const char *arg) {
+  args->count++;
+  args->value = realloc(args->value, args->count * sizeof(char *));
+  if (!args->value) { perror("realloc"); exit(EX_OSERR); }
+  args->value[args->count - 1] = m_strdup(arg);
+}
+
+static struct start_args jvm = {NULL, 0};
+static struct start_args game = {NULL, 0};
+static struct start_args duj = {NULL, 0};
 
 char *jvm_a_Xms;
 char *jvm_a_Xmx;
@@ -66,12 +76,12 @@ static int analyze(void);
 
 static void to_free(void) {
   free(java_path);
-  for (int i = 0; i < jvm_count; i++) free(jvm_args[i]);
-  free(jvm_args);
-  for (int i = 0; i < game_count; i++) free(game_args[i]);
-  free(game_args);
-  for (int i = 0; i < duj_count; i++) free(duj_args[i]);
-  free(duj_args);
+  for (int i = 0; i < jvm.count; i++) free(jvm.value[i]);
+  free(jvm.value);
+  for (int i = 0; i < game.count; i++) free(game.value[i]);
+  free(game.value);
+  for (int i = 0; i < duj.count; i++) free(duj.value[i]);
+  free(duj.value);
   free(mainClass);
   for (int i = 0; i < sizeof(jvm_a) / sizeof(m_string); ++i) {
     free(jvm_a[i].value);
@@ -87,33 +97,27 @@ static void to_free(void) {
   cJSON_Delete(version_json);
 }
 void start(void) {
-  jvm_args = NULL;
-  jvm_count = 0;
-  game_args = NULL;
-  game_count = 0;
-  duj_args = NULL;
-  duj_count = 0;
   if (analyze() == 0) {
     printf("Starting Minecraft %s...\n", game_a[1].value);
-    if (duj_count > 0) {
-      int new_count = jvm_count + duj_count;
-      jvm_args = realloc(jvm_args, new_count * sizeof(char *));
-      if (!jvm_args) { perror("realloc"); exit(EX_OSERR); }
-      memmove(jvm_args + duj_count, jvm_args, jvm_count * sizeof(char *));
-      for (int i = 0; i < duj_count; i++)
-        jvm_args[i] = duj_args[i];
-      jvm_count = new_count;
-      free(duj_args);
-      duj_args = NULL;
-      duj_count = 0;
+    if (duj.count > 0) {
+      int new_count = jvm.count + duj.count;
+      jvm.value = realloc(jvm.value, new_count * sizeof(char *));
+      if (!jvm.value) { perror("realloc"); exit(EX_OSERR); }
+      memmove(jvm.value + duj.count, jvm.value, jvm.count * sizeof(char *));
+      for (int i = 0; i < duj.count; i++)
+        jvm.value[i] = duj.value[i];
+      jvm.count = new_count;
+      free(duj.value);
+      duj.value = NULL;
+      duj.count = 0;
     }
-    int total = 1 + jvm_count + 1 + game_count;
+    int total = 1 + jvm.count + 1 + game.count;
     char **args = malloc((total + 1) * sizeof(char *));
     int arg_count = 0;
     args[arg_count++] = java_path;
-    for (int i = 0; i < jvm_count; i++) args[arg_count++] = jvm_args[i];
+    for (int i = 0; i < jvm.count; i++) args[arg_count++] = jvm.value[i];
     args[arg_count++] = mainClass;
-    for (int i = 0; i < game_count; i++) args[arg_count++] = game_args[i];
+    for (int i = 0; i < game.count; i++) args[arg_count++] = game.value[i];
     args[arg_count] = NULL;
     printf("start command:\n");
     for (int i = 0; i < arg_count; i++) printf("  [%d] %s\n", i, args[i]);
@@ -198,12 +202,8 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
           cJSON *default_user_jvm_value_res = cJSON_GetArrayItem(default_user_jvm_json, 0);
           cJSON *default_user_jvm_value_json = cJSON_GetObjectItemCaseSensitive(default_user_jvm_value_res, "value");
           cJSON_ArrayForEach(item,default_user_jvm_value_json) {
-            if (item->type == cJSON_String) {
-              duj_count++;
-              duj_args = realloc(duj_args, duj_count * sizeof(char *));
-              if (!duj_args) { perror("realloc"); exit(EX_OSERR); }
-              duj_args[duj_count - 1] = m_strdup(item->valuestring);
-            }
+            if (item->type == cJSON_String)
+              add_arg(&duj, item->valuestring);
           }
         }
         free(releaseTime);
@@ -213,20 +213,12 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
             flag = 1;
             for (int i = 0; i < sizeof(game_a) / sizeof(m_string); ++i) {
               if (strcmp(item->valuestring, game_a[i].key) == 0) {
-                game_count++;
-                game_args = realloc(game_args, game_count * sizeof(char *));
-                if (!game_args) { perror("realloc"); exit(EX_OSERR); }
-                game_args[game_count - 1] = m_strdup(game_a[i].value);
+                add_arg(&game, game_a[i].value);
                 flag = 0;
                 break;
               }
             }
-            if (flag) {
-              game_count++;
-              game_args = realloc(game_args, game_count * sizeof(char *));
-              if (!game_args) { perror("realloc"); exit(EX_OSERR); }
-              game_args[game_count - 1] = m_strdup(item->valuestring);
-            }
+            if (flag) add_arg(&game, item->valuestring);
           }
         }
         cJSON *version_arguments_jvm_json = cJSON_GetObjectItemCaseSensitive(version_arguments_json, "jvm");
@@ -298,13 +290,8 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
 
           cJSON *fabric_jvm_res = cJSON_GetObjectItemCaseSensitive(
             cJSON_GetObjectItemCaseSensitive(fabric_loader_json,"arguments"), "jvm");
-          cJSON_ArrayForEach(item,fabric_jvm_res) {
-            jvm_count++;
-            jvm_args = realloc(jvm_args, jvm_count * sizeof(char *));
-            if (!jvm_args) { perror("realloc"); exit(EX_OSERR); }
-            jvm_args[jvm_count - 1] = m_strdup(item->valuestring);
-          }
-
+          cJSON_ArrayForEach(item,fabric_jvm_res)
+            add_arg(&jvm, item->valuestring);
           cJSON_Delete(fabric_loader_json);
         }
         if (quilt_loader.type == TOML_STRING) {
@@ -328,11 +315,8 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
                 resolved = next;
               }
             }
-
-            jvm_count++;
-            jvm_args = realloc(jvm_args, jvm_count * sizeof(char *));
-            if (!jvm_args) { perror("realloc"); exit(EX_OSERR); }
-            jvm_args[jvm_count - 1] = resolved;
+            add_arg(&jvm, resolved);
+            free(resolved);
           }
         }
 
