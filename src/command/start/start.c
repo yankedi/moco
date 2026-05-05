@@ -14,6 +14,7 @@
 #include "utility/mtool.h"
 #include "utility/store/store.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,6 +126,7 @@ void start(void) {
     for (int i = 0; i < arg_count; i++) printf("  [%d] %s\n", i, args[i]);
     setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 1);
     setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 1);
+    chdir(game_a[2].value);
     pid_t pid = fork();
     if (pid == -1) {
       // fork 失败
@@ -158,18 +160,37 @@ void start(void) {
   }
 }
 
+static char *make_abs(const char *cwd, const char *path) {
+  char *abs;
+  m_asprintf(&abs, "%s/%s", cwd, path);
+  return abs;
+}
+
+static void cp_append(char **cp, const char *cwd, const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  char *rel;
+  vasprintf(&rel, fmt, args);
+  va_end(args);
+  char *old = *cp;
+  m_asprintf(cp, "%s:%s/%s", old, cwd, rel);
+  free(old);
+  free(rel);
+}
+
 static int analyze(void) {//TODO 重构为反箭头格式为卫语句
   if (access("instance.toml", F_OK) == 0) {
     if (access(".minecraft/versions/version.json", F_OK) == 0) {
       if (access(".moco/account.toml", F_OK) == 0) {
         printf("Login...\n");
         oauth2Refresh();
-        jvm_a[0].value = m_strdup(".moco/natives");
+        char *cwd = getcwd(NULL, 0);
+        jvm_a[0].value = make_abs(cwd, ".moco/natives");
         jvm_a[1].value = m_strdup("moco");
         jvm_a[2].value = m_strdup(MOCO_VERSION);
         jvm_a[3].value = m_strdup("");
-        game_a[2].value = m_strdup(".minecraft");
-        game_a[3].value = m_strdup(".minecraft/assets");
+        game_a[2].value = make_abs(cwd, ".minecraft");
+        game_a[3].value = make_abs(cwd, ".minecraft/assets");
         game_a[7].value = m_strdup("");
         game_a[10].value = m_strdup("msa");
         profile_r = toml_parse_file_ex(".moco/profile.toml");
@@ -190,7 +211,7 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
         char *releaseTime = m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "releaseTime")->valuestring);
 
         cJSON *item;
-        char *pre, *tmp, flag;
+        char *pre, flag;
         //default-user-jvm
         const int MC_26_1_SNAPSHOT_1_TIME_YEAR = 2025;
         //2025-12-16T12:42:29+00:00
@@ -241,11 +262,7 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
             cJSON *downloads_res = cJSON_GetObjectItemCaseSensitive(item, "downloads");
             cJSON *artifact_res = cJSON_GetObjectItemCaseSensitive(downloads_res, "artifact");
             cJSON *path_res = cJSON_GetObjectItemCaseSensitive(artifact_res, "path");
-            pre = jvm_a[3].value;
-            m_asprintf(&tmp, "%s:.minecraft/libraries/%s", jvm_a[3].value, path_res->valuestring);
-            free(pre);
-            jvm_a[3].value = tmp;
-            tmp = NULL;
+            cp_append(&jvm_a[3].value, cwd, ".minecraft/libraries/%s", path_res->valuestring);
           }
         }
         // java_path
@@ -253,10 +270,16 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
         toml_datum_t instance_root = instance_r.toptab;
         toml_datum_t java_path_res = toml_seek(instance_root, "launch.java_path");
         if (java_path_res.type != TOML_UNKNOWN) {
-          java_path = m_strdup(java_path_res.u.s);
+          java_path = realpath(java_path_res.u.s, NULL);
+          if (!java_path) java_path = m_strdup(java_path_res.u.s);
         } else if (access(".moco/java/bin/java", F_OK) == 0) {
-          java_path = m_strdup(".moco/java/bin/java");
+          char *abs_java = realpath(".moco/java/bin/java", NULL);
+          if (!abs_java) {
+            perror("realpath"); exit(1);
+          }
+          java_path = abs_java;
         } else {
+          free(cwd);
           return 1;
         }
 
@@ -268,6 +291,66 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
         //TODO 应写为只允许加载一个
         if (forge.type == TOML_STRING) {
           printf("Forge modloader detected: %s\n", forge.u.s);
+          char *name;
+          m_asprintf(&name, "%s-forge-%s", game_a[1].value, forge.u.s);
+          char *forge_json_path;
+          m_asprintf(&forge_json_path,".minecraft/versions/%s/%s.json"
+            ,name,name);
+          cJSON *forge_json = file_to_json(forge_json_path);
+          free(forge_json_path);
+
+          cJSON *forge_arguments = cJSON_GetObjectItemCaseSensitive(forge_json, "arguments");
+          cJSON *forge_game_a = cJSON_GetObjectItemCaseSensitive(forge_arguments, "game");
+          cJSON *forge_jvm_a_res = cJSON_GetObjectItemCaseSensitive(forge_arguments, "jvm");
+
+          cJSON_ArrayForEach(item, forge_game_a) add_arg(&game, item->valuestring);
+          m_string forge_jvm_a[] = {
+            {"${version_name}",NULL},
+            {"${library_directory}",NULL},
+            {"${classpath_separator}",NULL},
+          };
+
+          char *client_jar_path;
+          m_asprintf(&client_jar_path, "%s/.minecraft/versions/%s/%s", cwd, game_a[1].value, game_a[1].value);
+
+          forge_jvm_a[0].value = m_strdup(game_a[1].value);
+          forge_jvm_a[1].value = make_abs(cwd, ".minecraft/libraries");
+          forge_jvm_a[2].value = m_strdup(":");
+
+          cJSON_ArrayForEach(item,forge_jvm_a_res) {
+            char *resolved = m_strdup(item->valuestring);
+            for (int i = 0; i < sizeof(forge_jvm_a) / sizeof(m_string); ++i) {
+              char *next = m_replace(resolved, forge_jvm_a[i]);
+              if (next != NULL) {
+                free(resolved);
+                resolved = next;
+              }
+            }
+            add_arg(&jvm, resolved);
+            free(resolved);
+          }
+
+          free(mainClass);
+          mainClass = m_strdup(cJSON_GetObjectItemCaseSensitive(forge_json, "mainClass")->valuestring);
+
+          cJSON *forge_libraries = cJSON_GetObjectItemCaseSensitive(forge_json, "libraries");
+          cJSON_ArrayForEach(item, forge_libraries) {
+            cJSON *downloads_res = cJSON_GetObjectItemCaseSensitive(item, "downloads");
+            cJSON *artifact_res = cJSON_GetObjectItemCaseSensitive(downloads_res, "artifact");
+            cJSON *path_res = cJSON_GetObjectItemCaseSensitive(artifact_res, "path");
+            cp_append(&jvm_a[3].value, cwd, ".minecraft/libraries/%s", path_res->valuestring);
+          }
+
+          pre = jvm_a[3].value;
+          m_asprintf(&jvm_a[3].value, "%s:%s.jar", pre, client_jar_path);
+          free(pre);
+          free(client_jar_path);
+
+          free(forge_jvm_a[0].value);
+          free(forge_jvm_a[1].value);
+          free(forge_jvm_a[2].value);
+          cJSON_Delete(forge_json);
+          free(name);
         }
         if (neoforge.type == TOML_STRING) {
           printf("NeoForge modloader detected: %s\n", neoforge.u.s);
@@ -281,12 +364,8 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
           cJSON *fabric_libraries_res = cJSON_GetObjectItemCaseSensitive(fabric_loader_json, "libraries");
           cJSON_ArrayForEach(item,fabric_libraries_res) {
             char *name = reMaven(cJSON_GetObjectItemCaseSensitive(item, "name")->valuestring);
-            pre = jvm_a[3].value;
-            m_asprintf(&tmp,"%s:.minecraft/libraries/%s", jvm_a[3].value, name);
-            free(pre);
+            cp_append(&jvm_a[3].value, cwd, ".minecraft/libraries/%s", name);
             free(name);
-            jvm_a[3].value = tmp;
-            tmp = NULL;
           }
 
           free(mainClass);
@@ -302,12 +381,9 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
           printf("Quilt Loader modloader detected: %s\n", quilt_loader.u.s);
         }
 
-        pre = jvm_a[3].value;
-        m_asprintf(&tmp, "%s:.minecraft/versions/version/version.jar", jvm_a[3].value);
-        free(pre);
-        jvm_a[3].value = tmp;
-        tmp = NULL;
-
+        if (forge.type != TOML_STRING) {
+          cp_append(&jvm_a[3].value, cwd, ".minecraft/versions/version/version.jar");
+        }
         // jvm
         cJSON_ArrayForEach(item, version_arguments_jvm_json) {
           if (item->type == cJSON_String) {
@@ -328,6 +404,7 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
         add_arg(&jvm, jvm_a_Xms);
         add_arg(&jvm, jvm_a_Xmx);
 
+        free(cwd);
       } else {
         fprintf(stderr, "Error: .moco/account.toml not found.\nPlease run 'moco login' first.\n");
         return 1;

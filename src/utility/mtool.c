@@ -74,20 +74,24 @@ char *m_sha1(FILE *fp) {
 char *m_replace(const char *target, const m_string str) {
   if (!target || !str.key || !str.value)
     return NULL;
-  char *pos = strstr(target, str.key);
-  if (pos == NULL) {
-    free(pos);
+  if (strstr(target, str.key) == NULL)
     return NULL;
-  }
-  size_t head_len = pos - target;
+
+  char *current = m_strdup(target);
   size_t key_len = strlen(str.key);
   size_t val_len = strlen(str.value);
-  size_t tail_len = strlen(pos + key_len);
-  size_t total_len = head_len + val_len + tail_len + 1;
-  char *result = m_malloc(total_len);
-  memcpy(result, target, head_len);
-  memcpy(result + head_len, str.value, val_len);
-  memcpy(result + head_len + val_len, pos + key_len, tail_len + 1);
+  char *pos;
 
-  return result;
+  while ((pos = strstr(current, str.key)) != NULL) {
+    size_t head_len = pos - current;
+    size_t tail_len = strlen(pos + key_len);
+    char *next = m_malloc(head_len + val_len + tail_len + 1);
+    memcpy(next, current, head_len);
+    memcpy(next + head_len, str.value, val_len);
+    memcpy(next + head_len + val_len, pos + key_len, tail_len + 1);
+    free(current);
+    current = next;
+  }
+
+  return current;
 }
