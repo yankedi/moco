@@ -285,10 +285,10 @@ void installDependencies() {
       system(".moco/java/bin/java -jar .moco/forge-installer.jar --installClient .minecraft");
     }
     if (neoforge.type == TOML_STRING) {
-      if (strstr(version.u.s,"1.20.2")!=NULL || strstr(version.u.s,"1.20.3")!=NULL) {
-        fprintf(stderr,"Sorry,the neoforge 1.20.2/1.20.3 is too chaos,not be support\n");
-        m_exit(EX_DATAERR);
-      }
+      //if (strstr(version.u.s,"1.20.2")!=NULL || strstr(version.u.s,"1.20.3")!=NULL) {
+      //  fprintf(stderr,"Sorry,the neoforge 1.20.2/1.20.3 is too chaos,not be support\n");
+      //  m_exit(EX_DATAERR);
+      //}
       //https://maven.neoforged.net/releases/net/neoforged/neoforge/[NeoForge版本号]/neoforge-[NeoForge版本号]-installer.jar
       download_java();
       package *neoforge_installer_package = m_malloc(sizeof(package));

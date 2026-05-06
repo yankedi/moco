@@ -172,8 +172,12 @@ static void cp_append(char **cp, const char *cwd, const char *fmt, ...) {
   char *rel;
   vasprintf(&rel, fmt, args);
   va_end(args);
+  if (strstr(*cp, rel)) { free(rel); return; }
   char *old = *cp;
-  m_asprintf(cp, "%s:%s/%s", old, cwd, rel);
+  if (**cp)
+    m_asprintf(cp, "%s:%s/%s", old, cwd, rel);
+  else
+    m_asprintf(cp, "%s/%s", cwd, rel);
   free(old);
   free(rel);
 }
@@ -211,7 +215,7 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
         char *releaseTime = m_strdup(cJSON_GetObjectItemCaseSensitive(version_json, "releaseTime")->valuestring);
 
         cJSON *item;
-        char *pre, flag;
+        char flag;
         //default-user-jvm
         const int MC_26_1_SNAPSHOT_1_TIME_YEAR = 2025;
         //2025-12-16T12:42:29+00:00
@@ -289,38 +293,40 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
         toml_datum_t fabric_loader = toml_seek(instance_root, "dependencies.fabric-loader");
         toml_datum_t quilt_loader = toml_seek(instance_root, "dependencies.quilt-loader");
         //TODO 应写为只允许加载一个
-        if (forge.type == TOML_STRING) {
-          printf("Forge modloader detected: %s\n", forge.u.s);
+        if (forge.type == TOML_STRING || neoforge.type == TOML_STRING) {
           char *name;
-          m_asprintf(&name, "%s-forge-%s", game_a[1].value, forge.u.s);
-          char *forge_json_path;
-          m_asprintf(&forge_json_path,".minecraft/versions/%s/%s.json"
-            ,name,name);
-          cJSON *forge_json = file_to_json(forge_json_path);
-          free(forge_json_path);
+          if (forge.type == TOML_STRING) {
+            printf("Forge modloader detected: %s\n", forge.u.s);
+            m_asprintf(&name, "%s-forge-%s", game_a[1].value, forge.u.s);
+          } else {
+            printf("NeoForge modloader detected: %s\n", neoforge.u.s);
+            m_asprintf(&name, "neoforge-%s", neoforge.u.s);
+          }
 
-          cJSON *forge_arguments = cJSON_GetObjectItemCaseSensitive(forge_json, "arguments");
-          cJSON *forge_game_a = cJSON_GetObjectItemCaseSensitive(forge_arguments, "game");
-          cJSON *forge_jvm_a_res = cJSON_GetObjectItemCaseSensitive(forge_arguments, "jvm");
+          char *json_path;
+          m_asprintf(&json_path, ".minecraft/versions/%s/%s.json", name, name);
+          cJSON *modloader_json = file_to_json(json_path);
+          free(json_path);
 
-          cJSON_ArrayForEach(item, forge_game_a) add_arg(&game, item->valuestring);
-          m_string forge_jvm_a[] = {
-            {"${version_name}",NULL},
-            {"${library_directory}",NULL},
-            {"${classpath_separator}",NULL},
+          cJSON *modloader_arguments = cJSON_GetObjectItemCaseSensitive(modloader_json, "arguments");
+          cJSON *modloader_game_a = cJSON_GetObjectItemCaseSensitive(modloader_arguments, "game");
+          cJSON *modloader_jvm_a_res = cJSON_GetObjectItemCaseSensitive(modloader_arguments, "jvm");
+
+          cJSON_ArrayForEach(item, modloader_game_a) add_arg(&game, item->valuestring);
+
+          m_string modloader_jvm_a[] = {
+            {"${version_name}", NULL},
+            {"${library_directory}", NULL},
+            {"${classpath_separator}", NULL},
           };
+          modloader_jvm_a[0].value = m_strdup(game_a[1].value);
+          modloader_jvm_a[1].value = make_abs(cwd, ".minecraft/libraries");
+          modloader_jvm_a[2].value = m_strdup(":");
 
-          char *client_jar_path;
-          m_asprintf(&client_jar_path, "%s/.minecraft/versions/%s/%s", cwd, game_a[1].value, game_a[1].value);
-
-          forge_jvm_a[0].value = m_strdup(game_a[1].value);
-          forge_jvm_a[1].value = make_abs(cwd, ".minecraft/libraries");
-          forge_jvm_a[2].value = m_strdup(":");
-
-          cJSON_ArrayForEach(item,forge_jvm_a_res) {
+          cJSON_ArrayForEach(item, modloader_jvm_a_res) {
             char *resolved = m_strdup(item->valuestring);
-            for (int i = 0; i < sizeof(forge_jvm_a) / sizeof(m_string); ++i) {
-              char *next = m_replace(resolved, forge_jvm_a[i]);
+            for (int i = 0; i < sizeof(modloader_jvm_a) / sizeof(m_string); ++i) {
+              char *next = m_replace(resolved, modloader_jvm_a[i]);
               if (next != NULL) {
                 free(resolved);
                 resolved = next;
@@ -331,29 +337,21 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
           }
 
           free(mainClass);
-          mainClass = m_strdup(cJSON_GetObjectItemCaseSensitive(forge_json, "mainClass")->valuestring);
+          mainClass = m_strdup(cJSON_GetObjectItemCaseSensitive(modloader_json, "mainClass")->valuestring);
 
-          cJSON *forge_libraries = cJSON_GetObjectItemCaseSensitive(forge_json, "libraries");
-          cJSON_ArrayForEach(item, forge_libraries) {
+          cJSON *modloader_libraries = cJSON_GetObjectItemCaseSensitive(modloader_json, "libraries");
+          cJSON_ArrayForEach(item, modloader_libraries) {
             cJSON *downloads_res = cJSON_GetObjectItemCaseSensitive(item, "downloads");
             cJSON *artifact_res = cJSON_GetObjectItemCaseSensitive(downloads_res, "artifact");
             cJSON *path_res = cJSON_GetObjectItemCaseSensitive(artifact_res, "path");
             cp_append(&jvm_a[3].value, cwd, ".minecraft/libraries/%s", path_res->valuestring);
           }
 
-          pre = jvm_a[3].value;
-          m_asprintf(&jvm_a[3].value, "%s:%s.jar", pre, client_jar_path);
-          free(pre);
-          free(client_jar_path);
-
-          free(forge_jvm_a[0].value);
-          free(forge_jvm_a[1].value);
-          free(forge_jvm_a[2].value);
-          cJSON_Delete(forge_json);
+          free(modloader_jvm_a[0].value);
+          free(modloader_jvm_a[1].value);
+          free(modloader_jvm_a[2].value);
+          cJSON_Delete(modloader_json);
           free(name);
-        }
-        if (neoforge.type == TOML_STRING) {
-          printf("NeoForge modloader detected: %s\n", neoforge.u.s);
         }
         if (fabric_loader.type == TOML_STRING) {
           printf("Fabric Loader modloader detected: %s\n", fabric_loader.u.s);
@@ -381,7 +379,7 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
           printf("Quilt Loader modloader detected: %s\n", quilt_loader.u.s);
         }
 
-        if (forge.type != TOML_STRING) {
+        if (forge.type != TOML_STRING && neoforge.type != TOML_STRING) {
           cp_append(&jvm_a[3].value, cwd, ".minecraft/versions/version/version.jar");
         }
         // jvm
