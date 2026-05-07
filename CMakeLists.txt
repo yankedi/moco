@@ -82,6 +82,9 @@ add_executable(moco
         src/command/import/import.h
         src/utility/file/zip.c
         src/utility/file/zip.h
+        src/utility/minecraft/version.c
+        src/utility/minecraft/version.c
+        src/utility/minecraft/version.h
 )
 
 target_link_libraries(moco PRIVATE

@@ -259,6 +259,7 @@ void installDependencies() {
     toml_datum_t neoforge = toml_seek(root, "dependencies.neoforge");
     toml_datum_t fabric_loader = toml_seek(root, "dependencies.fabric-loader");
     toml_datum_t quilt_loader = toml_seek(root, "dependencies.quilt-loader");
+    //TODO 本地化forge，neoforge安装
     if (forge.type == TOML_STRING) {
       //https://maven.minecraftforge.net/net/minecraftforge/forge/{MC版本}-{Forge版本}/forge-{MC版本}-{Forge版本}-installer.jar
       if (download_java()!=0) {

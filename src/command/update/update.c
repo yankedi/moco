@@ -36,7 +36,7 @@ void update(void) {
   m_asprintf(&manifest_path, "%s/version_manifest_v2.json", XDG_DATA_HOME);
   char *url = m_strdup(
       "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
-  printf("Download version_manifest_v2.json ing....\n");
+  printf("Download Minecraft version_manifest_v2.json ing....\n");
   remove(manifest_path);
   package *manifest = m_malloc(sizeof(package));
   manifest->url = url;
@@ -45,6 +45,43 @@ void update(void) {
   manifest->store = m_strdup(manifest_path);
   submit_download_task(manifest);
   free_package(manifest);
+
+  //https://meta.fabricmc.net/v2/versions
+  char *fabric_manifest_path;
+  m_asprintf(&fabric_manifest_path, "%s/fabric_manifest.json", XDG_DATA_HOME);
+  printf("Download Fabric Loader version manifest ing....\n");
+  package *fabric_manifest = m_malloc(sizeof(package));
+  fabric_manifest->url = m_strdup("https://meta.fabricmc.net/v2/versions");
+  fabric_manifest->path = fabric_manifest_path;
+  fabric_manifest->sha1 = m_strdup("-1");
+  fabric_manifest->store = m_strdup(fabric_manifest_path);
+  submit_download_task(fabric_manifest);
+  free_package(fabric_manifest);
+
+  //https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml
+  char *forge_manifest_path;
+  m_asprintf(&forge_manifest_path, "%s/forge_manifest.xml", XDG_DATA_HOME);
+  printf("Download Forge version manifest ing....\n");
+  package *forge_manifest = m_malloc(sizeof(package));
+  forge_manifest->url = m_strdup("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml");
+  forge_manifest->path = forge_manifest_path;
+  forge_manifest->sha1 = m_strdup("-1");
+  forge_manifest->store = m_strdup(forge_manifest_path);
+  submit_download_task(forge_manifest);
+  free_package(forge_manifest);
+
+  //https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge
+  char *neoforge_manifest_path;
+  m_asprintf(&neoforge_manifest_path, "%s/neoforge_manifest.json",XDG_DATA_HOME);
+  printf("Download NeoForge version manifest ing....\n");
+  package *neoforge_manifest = m_malloc(sizeof(package));
+  neoforge_manifest->url = m_strdup("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge");
+  neoforge_manifest->path = neoforge_manifest_path;
+  neoforge_manifest->sha1 = m_strdup("-1");
+  neoforge_manifest->store = m_strdup(neoforge_manifest_path);
+  submit_download_task(neoforge_manifest);
+  free_package(neoforge_manifest);
+
   wait_epoll_download_task();
   // testSource();
   // downloadInit();
