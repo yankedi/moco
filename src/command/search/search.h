@@ -5,8 +5,14 @@
 #ifndef MOCO_SEARCH_H
 #define MOCO_SEARCH_H
 #include "interface.h"
+typedef enum {V,L} search_mode;
 extern void search(int argc, char *argv[]);
 // extern package *get_version(const char *v);
 extern SearchResult *search_versions(const char *v);
 extern SearchResult *search_version(const char *v);
+extern SearchResult *search_forge(const char *id, const search_mode mode);
+extern SearchResult *search_forges(const char *id, const search_mode mode);
+extern SearchResult *search_neoforge(const char *id, const search_mode mode);
+extern SearchResult *search_neoforges(const char *id, const search_mode mode);
+extern SearchResult *search_fabric(const char *v);
 #endif // MOCO_SEARCH_H

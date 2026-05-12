@@ -7,16 +7,18 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-struct option cli_options[] = {{"help", no_argument, NULL, 'h'}, {0, 0, 0, 0}};
+struct option cli_options[] = {{"help", no_argument, NULL, 'h'},
+                               {0, 0, 0, 0}};
 
 struct option search_options[] = {{"help", no_argument, NULL, 'h'},
                                   {"version", required_argument, NULL, 'v'},
                                   {0, 0, 0, 0}};
 
-struct option import_options[] = {
-  {"help",no_argument,NULL,'h'},
-  {0,0,0,0}
-};
+struct option import_options[] = {{"help", no_argument, NULL, 'h'},
+                                  {0, 0, 0, 0}};
+
+struct option install_options[] = {{"help", no_argument, NULL, 'h'},
+                                   {0, 0, 0, 0}};
 
 void free_package(package *p) {
   if (p) {
@@ -33,7 +35,8 @@ void free_package(package *p) {
 }
 
 void free_SearchResult(SearchResult *result) {
-  for (int i = 0;i < result->count;++i) {
+  if (result == NULL) return;
+  for (int i = 0; i < result->count; ++i) {
     cJSON_Delete(result->node[i]);
   }
   free(result->node);

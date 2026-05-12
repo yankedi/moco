@@ -49,7 +49,7 @@ int main(int argc, char *argv[]) {
     if (strcmp(subcommand, "login") == 0)
       login();
     if (strcmp(subcommand, "install") == 0)
-      install();
+      install(argc - optind, argv + optind);
     if (strcmp(subcommand, "update") == 0)
       update();
     if (strcmp(subcommand, "search") == 0) {

@@ -47,14 +47,25 @@ int has_version(const char *id) {
   cJSON *json = file_to_json(json_path);
   free(json_path);
   cJSON *versions = cJSON_GetObjectItemCaseSensitive(json, "versions");
+
+  /* Mojang strips trailing .0 from version strings (e.g. "26.1.0" is "26.1") */
+  char *normalized = m_strdup(id);
+  int nlen = strlen(normalized);
+  while (nlen > 2 && normalized[nlen - 1] == '0' && normalized[nlen - 2] == '.') {
+    normalized[nlen - 2] = '\0';
+    nlen -= 2;
+  }
+
   cJSON *tmp;
   cJSON_ArrayForEach(tmp, versions) {
     const cJSON *versionId = cJSON_GetObjectItemCaseSensitive(tmp, "id");
-    if (strcmp(versionId->valuestring, id) == 0) {
+    if (strcmp(versionId->valuestring, normalized) == 0) {
+      free(normalized);
       cJSON_Delete(json);
       return 0;
     }
   }
+  free(normalized);
   cJSON_Delete(json);
   return -1;
 }

@@ -4,5 +4,5 @@
 
 #ifndef MOCO_INSTALL_H
 #define MOCO_INSTALL_H
-extern void install(void);
+extern void install(int argc, char *argv[]);
 #endif // MOCO_INSTALL_H
