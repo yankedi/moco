@@ -11,7 +11,7 @@
 #include "utility/store/store.h"
 #include "zip.h"
 
-#include <bits/getopt_core.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,10 +95,10 @@ void import(int argc, char *argv[]) {
                       "modpack_mode = \"modrinth\"\n"
                       "version = \"%s\"\n", name,versionId,minecraft_version);
         fprintf(file, "[dependencies]\n");
-        if (forge) fprintf(file, "forge = \"%s\"\n", forge->valuestring);
-        if (neoforge) fprintf(file, "neoforge = \"%s\"\n", neoforge->valuestring);
-        if (fabric_loader) fprintf(file, "fabric-loader = \"%s\"\n", fabric_loader->valuestring);
-        if (quilt_loader) fprintf(file, "quilt-loader = \"%s\"\n", quilt_loader->valuestring);
+        if (forge)          fprintf(file, "loader = \"forge\"\nloader_version = \"%s\"\n", forge->valuestring);
+        else if (neoforge)  fprintf(file, "loader = \"neoforge\"\nloader_version = \"%s\"\n", neoforge->valuestring);
+        else if (fabric_loader) fprintf(file, "loader = \"fabric-loader\"\nloader_version = \"%s\"\n", fabric_loader->valuestring);
+        else if (quilt_loader)  fprintf(file, "loader = \"quilt-loader\"\nloader_version = \"%s\"\n", quilt_loader->valuestring);
         cJSON *mods = cJSON_GetObjectItemCaseSensitive(json,"files");
         cJSON *item;
         cJSON_ArrayForEach(item,mods) {

@@ -17,10 +17,6 @@ typedef enum {
   EPOLL_SIGNAL_EXIT = 1,
 } EpollSignal;
 
-extern int g_task_pipe_write_fd;
-extern pthread_t epoll_download_thread_id;
-extern volatile EpollSignal g_epoll_signal;
-
 extern void init_epoll_download_task();
 extern void wait_epoll_download_task();
 extern void wait_download_task(const char *store);

@@ -79,6 +79,14 @@ int curl_post(const char *url, const char *post_fields, char **response_body) {
   return 0;
 }
 //TODO 优化并提取整个文件到utility
+char *curl_encode(const char *str) {
+  if (str == NULL) return NULL;
+  CURL *curl = curl_easy_init();
+  char *encoded = curl_easy_escape(curl, str, 0);
+  curl_easy_cleanup(curl);
+  return encoded;
+}
+
 int curl_get(const char *url,char **response_body) {
   CURL *curl = curl_easy_init();
   struct MemoryBlock chunk = {.memory = m_malloc(1), .size = 0};

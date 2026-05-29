@@ -20,6 +20,15 @@ struct option import_options[] = {{"help", no_argument, NULL, 'h'},
 struct option install_options[] = {{"help", no_argument, NULL, 'h'},
                                    {0, 0, 0, 0}};
 
+struct option search_modrinth_options[] = {{"help", no_argument, NULL, 'h'},
+                                           {"version", required_argument, NULL, 'v'},
+                                           {"loader", required_argument, NULL, 'l'},
+                                           {"sort", required_argument, NULL, 's'},
+                                           {"type", required_argument, NULL, 't'},
+                                           {"category", required_argument, NULL, 'c'},
+                                           {"author", required_argument, NULL, 'a'},
+                                           {0, 0, 0, 0}};
+
 void free_package(package *p) {
   if (p) {
     if (p->path)
@@ -35,7 +44,8 @@ void free_package(package *p) {
 }
 
 void free_SearchResult(SearchResult *result) {
-  if (result == NULL) return;
+  if (result == NULL)
+    return;
   for (int i = 0; i < result->count; ++i) {
     cJSON_Delete(result->node[i]);
   }

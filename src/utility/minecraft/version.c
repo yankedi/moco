@@ -41,6 +41,11 @@ static int mc_v(const char *v) {
 }
 */
 
+/**
+ *
+ * @param id a minecraft version string
+ * @return 0 if version exists, -1 if not
+ */
 int has_version(const char *id) {
   char *json_path;
   m_asprintf(&json_path, "%s/version_manifest_v2.json", XDG_DATA_HOME);

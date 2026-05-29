@@ -7,6 +7,7 @@
 #include "env.h"
 #include "utility/file/json.h"
 #include "utility/minecraft/version.h"
+#include "utility/modrinth/search.h"
 #include "utility/mtool.h"
 #include "utility/store/store.h"
 
@@ -37,34 +38,29 @@ void search(int argc, char *argv[]) {
     if (strcmp(subcommand, "versions") == 0) {
       SearchResult *result = search_versions(argv[optind + 1]);
       free_SearchResult(result);
-    }
-    if (strcmp(subcommand, "version") == 0) {
+    } else if (strcmp(subcommand, "version") == 0) {
       SearchResult *result = search_version(argv[optind + 1]);
       free_SearchResult(result);
-    }
-    if (strcmp(subcommand,"forge") == 0) {
+    } else if (strcmp(subcommand,"forge") == 0) {
       SearchResult *result = search_forge(argv[optind + 1],V);
       free_SearchResult(result);
-    }
-    if (strcmp(subcommand,"forges") == 0) {
+    } else if (strcmp(subcommand,"forges") == 0) {
       SearchResult *result = search_forges(argv[optind + 1], V);
       free_SearchResult(result);
-    }
-    if (strcmp(subcommand,"neoforge") == 0) {
+    } else if (strcmp(subcommand,"neoforge") == 0) {
       SearchResult *result = search_neoforge(argv[optind + 1], V);
       free_SearchResult(result);
-    }
-    if (strcmp(subcommand,"neoforges") == 0) {
+    } else if (strcmp(subcommand,"neoforges") == 0) {
       SearchResult *result = search_neoforges(argv[optind + 1], V);
       free_SearchResult(result);
-    }
-    if (strcmp(subcommand,"fabric") == 0) {
+    } else if (strcmp(subcommand,"fabric") == 0) {
       SearchResult *result = search_fabric(argv[optind + 1]);
       free_SearchResult(result);
-    }
-    if (strcmp(subcommand,"fabrics") == 0) {
+    } else if (strcmp(subcommand,"fabrics") == 0) {
       SearchResult *result = search_fabric("");
       free_SearchResult(result);
+    } else {
+      search_modrinth(argc, argv);
     }
   }
 }
@@ -94,7 +90,8 @@ SearchResult *search_fabric(const char *id) {
         SearchResult *result = m_malloc(sizeof(SearchResult));
         cJSON *v = cJSON_CreateObject();
         cJSON_AddStringToObject(v, "version", "fabric");
-        cJSON_AddStringToObject(v, "loader", ver->valuestring);
+        cJSON_AddStringToObject(v, "loader", "fabric-loader");
+        cJSON_AddStringToObject(v, "loader_version", ver->valuestring);
         result->node = malloc(sizeof(cJSON *));
         result->node[0] = v;
         result->count = 1;
@@ -112,7 +109,8 @@ SearchResult *search_fabric(const char *id) {
   SearchResult *result = m_malloc(sizeof(SearchResult));
   cJSON *v = cJSON_CreateObject();
   cJSON_AddStringToObject(v, "version", "fabric");
-  cJSON_AddStringToObject(v, "loader", version->valuestring);
+  cJSON_AddStringToObject(v, "loader", "fabric-loader");
+  cJSON_AddStringToObject(v, "loader_version", version->valuestring);
   result->node = malloc(sizeof(cJSON *));
   result->node[0] = v;
   result->count = 1;
@@ -176,7 +174,8 @@ SearchResult *search_neoforges(const char *id, const search_mode mode) {
       } else {
         cJSON_AddStringToObject(v, "version", f);
       }
-      cJSON_AddStringToObject(v, "loader", version_n);
+      cJSON_AddStringToObject(v, "loader", "neoforge");
+      cJSON_AddStringToObject(v, "loader_version", version_n);
       result->node = realloc(result->node, sizeof(cJSON *) * (result->count + 1));
       memmove(result->node + 1, result->node, sizeof(cJSON *) * result->count);
       result->node[0] = v;
@@ -191,7 +190,7 @@ SearchResult *search_neoforges(const char *id, const search_mode mode) {
     for (int i = 0; i < result->count; ++i) {
       cJSON *node = result->node[i];
       printf("minecraft version: %s\n", cJSON_GetObjectItemCaseSensitive(node, "version")->valuestring);
-      printf("neoforge version: %s\n\n", cJSON_GetObjectItemCaseSensitive(node, "loader")->valuestring);
+      printf("neoforge version: %s\n\n", cJSON_GetObjectItemCaseSensitive(node, "loader_version")->valuestring);
     }
     cJSON_Delete(manifest);
     return result;
@@ -261,7 +260,8 @@ SearchResult *search_neoforge(const char *id, const search_mode mode) {
       } else {
         cJSON_AddStringToObject(v, "version", f);
       }
-      cJSON_AddStringToObject(v, "loader", version_n);
+      cJSON_AddStringToObject(v, "loader", "neoforge");
+      cJSON_AddStringToObject(v, "loader_version", version_n);
       result->node = realloc(result->node, sizeof(cJSON *) * (result->count + 1));
       memmove(result->node + 1, result->node, sizeof(cJSON *) * result->count);
       result->node[0] = v;
@@ -276,7 +276,7 @@ SearchResult *search_neoforge(const char *id, const search_mode mode) {
     for (int i = 0; i < result->count; ++i) {
       cJSON *node = result->node[i];
       printf("minecraft version: %s\n", cJSON_GetObjectItemCaseSensitive(node, "version")->valuestring);
-      printf("neoforge version: %s\n\n", cJSON_GetObjectItemCaseSensitive(node, "loader")->valuestring);
+      printf("neoforge version: %s\n\n", cJSON_GetObjectItemCaseSensitive(node, "loader_version")->valuestring);
     }
     cJSON_Delete(manifest);
     return result;
@@ -317,7 +317,8 @@ SearchResult *search_forges(const char *id, const search_mode mode) {
     if (strstr(target, id) != NULL) {
       cJSON *v = cJSON_CreateObject();
       cJSON_AddStringToObject(v, "version", f);
-      cJSON_AddStringToObject(v, "loader", b);
+      cJSON_AddStringToObject(v, "loader", "forge");
+      cJSON_AddStringToObject(v, "loader_version", b);
       result->node = realloc(result->node, sizeof(cJSON *) * (result->count + 1));
       result->node[result->count] = v;
       result->count++;
@@ -372,7 +373,8 @@ SearchResult *search_forge(const char *id,const search_mode mode) {
     if (compare == 0) {
       cJSON *v = cJSON_CreateObject();
       cJSON_AddStringToObject(v, "version", f);
-      cJSON_AddStringToObject(v, "loader", b);
+      cJSON_AddStringToObject(v, "loader", "forge");
+      cJSON_AddStringToObject(v, "loader_version", b);
       result->node = realloc(result->node, sizeof(cJSON *) * (result->count + 1));
       result->node[result->count] = v;
       result->count++;

@@ -20,10 +20,10 @@
 #include <sysexits.h>
 #include <unistd.h>
 
-toml_result_t result;
-toml_datum_t root;
-toml_datum_t version;
-int total = 0;
+static toml_result_t result;
+static toml_datum_t root;
+static toml_datum_t version;
+static int total = 0;
 // const char *manifest_source;
 // const char *assets_source;
 
@@ -41,8 +41,8 @@ static void installNeoforge(const char *id);
 static void installFabric(const char *id);
 
 void install(int argc, char *argv[]) {
-  if (analyze() != 0){
-   m_exit(EX_DATAERR);
+  if (analyze() != 0) {
+    m_exit(EX_DATAERR);
   }
   if (argc == 1) {
     installVersion();
@@ -53,7 +53,7 @@ void install(int argc, char *argv[]) {
     int opt;
     int option_index = 0;
     optind = 1;
-    while ((opt = getopt_long(argc,argv,"+h", install_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "+h", install_options, &option_index)) != -1) {
       switch (opt) {
       case 'h':
         printf("Usage: moco install [options]\n");
@@ -66,169 +66,102 @@ void install(int argc, char *argv[]) {
     }
     char *subcommand = argv[optind];
     if (subcommand != NULL) {
-      if (strcmp(subcommand,"forge") == 0) {
+      if (strcmp(subcommand, "forge") == 0) {
         installForge(argv[optind + 1]);
       }
-      if (strcmp(subcommand,"neoforge") == 0) {
+      if (strcmp(subcommand, "neoforge") == 0) {
         installNeoforge(argv[optind + 1]);
       }
-      if (strcmp(subcommand,"fabric") == 0) {
+      if (strcmp(subcommand, "fabric") == 0) {
         installFabric(argv[optind + 1]);
       }
     }
   }
   toml_free(result);
 }
-//引入LOCK文件锁来追踪安装状态
+// 引入LOCK文件锁来追踪安装状态
 static int check_modloader(void) {
   toml_result_t r = toml_parse_file_ex("instance.toml");
-  if (!r.ok) return 0;
-  const char *keys[] = {"forge", "neoforge", "fabric-loader"};
-  int count = 0;
-  for (int i = 0; i < 3; i++) {
-    char buf[128];
-    snprintf(buf, sizeof(buf), "dependencies.%s", keys[i]);
-    if (toml_seek(r.toptab, buf).type == TOML_STRING) count++;
+  if (!r.ok)
+    return 0;
+  toml_datum_t dep = toml_seek(r.toptab, "dependencies.loader");
+  if (dep.type == TOML_STRING) {
+    toml_datum_t ver = toml_seek(r.toptab, "dependencies.loader_version");
+    fprintf(stderr, "%s is already installed (%s)\n", dep.u.s,
+            ver.type == TOML_STRING ? ver.u.s : "unknown");
+    toml_free(r);
+    return 1;
   }
   toml_free(r);
-  return count;
+  return 0;
 }
 
-void installForge(const char *id) {
-  if (check_modloader() != 0) { fprintf(stderr, "A modloader is already installed\n"); return; }
+static void install_modloader(const char *key, const char *name, int is_fabric,
+                              const char *id) {
+  if (check_modloader() != 0)
+    return;
   SearchResult *result = NULL;
   FILE *fp = fopen("instance.toml", "r+");
   if (id != NULL) {
-    result = search_forge(id, L);
+    if (is_fabric)
+      result = search_fabric(id);
+    else if (strcmp(key, "forge") == 0)
+      result = search_forge(id, L);
+    else
+      result = search_neoforge(id, L);
     if (result == NULL) {
-      fprintf(stderr, "Forge version %s not found\n", id);
+      fprintf(stderr, "%s version %s not found\n", name, id);
       fclose(fp);
       m_exit(EX_DATAERR);
     }
-    if (strcmp(cJSON_GetObjectItemCaseSensitive(result->node[0], "version")->valuestring, version.u.s) != 0) {
-      fprintf(stderr, "Forge version %s is not compatible with Minecraft %s\n",
-        cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring, version.u.s);
+    if (!is_fabric && strcmp(cJSON_GetObjectItemCaseSensitive(
+                                 result->node[0], "version")
+                                 ->valuestring,
+                             version.u.s) != 0) {
+      fprintf(stderr, "%s version %s is not compatible with Minecraft %s\n",
+              name, cJSON_GetObjectItemCaseSensitive(result->node[0], "loader_version")->valuestring, version.u.s);
       fclose(fp);
       m_exit(EX_DATAERR);
     }
-    printf("Forge version %s found for Minecraft %s\n",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring, version.u.s);
-    char *value;
-    m_asprintf(&value, "forge = \"%s\"", cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring);
-    toml_add_table(fp, "[dependencies]", value);
-    free(value);
-    installVersion();
-    fclose(fp);
-    installDependencies();
+    if (is_fabric)
+      printf("Warning: you are using a non-latest Fabric Loader version, "
+             "unexpected bugs may occur\n");
+    printf("%s version %s found\n", name,
+           cJSON_GetObjectItemCaseSensitive(result->node[0],
+                                            "loader_version")
+               ->valuestring);
   } else {
-    result = search_forge(version.u.s, V);
+    if (is_fabric)
+      result = search_fabric("");
+    else if (strcmp(key, "forge") == 0)
+      result = search_forge(version.u.s, V);
+    else
+      result = search_neoforge(version.u.s, V);
     if (result == NULL) {
-      fprintf(stderr, "Forge version for Minecraft %s not found\n", version.u.s);
+      fprintf(stderr, "%s version for Minecraft %s not found\n",
+              name, version.u.s);
       fclose(fp);
       m_exit(EX_DATAERR);
     }
-    printf("Latest Forge version %s found for Minecraft %s\n",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring, version.u.s);
-    char *value;
-    m_asprintf(&value, "forge = \"%s\"",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring);
-    toml_add_table(fp, "[dependencies]", value);
-    free(value);
-    installVersion();
-    fclose(fp);
-    installDependencies();
+    printf("Latest %s version %s found\n", name,
+           cJSON_GetObjectItemCaseSensitive(result->node[0],
+                                            "loader_version")
+               ->valuestring);
   }
+  char *lv;
+  m_asprintf(&lv, "loader = \"%s\"\nloader_version = \"%s\"",
+             key, cJSON_GetObjectItemCaseSensitive(result->node[0], "loader_version")->valuestring);
+  toml_add_table(fp, "[dependencies]", lv);
+  free(lv);
+  installVersion();
+  fclose(fp);
+  installDependencies();
   free_SearchResult(result);
 }
 
-void installNeoforge(const char *id) {
-  if (check_modloader() != 0) { fprintf(stderr, "A modloader is already installed\n"); return; }
-  SearchResult *result = NULL;
-  FILE *fp = fopen("instance.toml", "r+");
-  if (id != NULL) {
-    result = search_neoforge(id, L);
-    if (result == NULL) {
-      fprintf(stderr, "NeoForge version %s not found\n", id);
-      fclose(fp);
-      m_exit(EX_DATAERR);
-    }
-    if (strcmp(cJSON_GetObjectItemCaseSensitive(result->node[0], "version")->valuestring, version.u.s) != 0) {
-      fprintf(stderr, "NeoForge version %s is not compatible with Minecraft %s\n",
-        cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring, version.u.s);
-      fclose(fp);
-      m_exit(EX_DATAERR);
-    }
-    printf("NeoForge version %s found for Minecraft %s\n",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring, version.u.s);
-    char *value;
-    m_asprintf(&value, "neoforge = \"%s\"", cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring);
-    toml_add_table(fp, "[dependencies]", value);
-    free(value);
-    installVersion();
-    fclose(fp);
-    installDependencies();
-  } else {
-    result = search_neoforge(version.u.s, V);
-    if (result == NULL) {
-      fprintf(stderr, "NeoForge version for Minecraft %s not found\n", version.u.s);
-      fclose(fp);
-      m_exit(EX_DATAERR);
-    }
-    printf("Latest NeoForge version %s found for Minecraft %s\n",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring, version.u.s);
-    char *value;
-    m_asprintf(&value, "neoforge = \"%s\"",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring);
-    toml_add_table(fp, "[dependencies]", value);
-    free(value);
-    installVersion();
-    fclose(fp);
-    installDependencies();
-  }
-  free_SearchResult(result);
-}
-
-void installFabric(const char *id) {
-  if (check_modloader() != 0) { fprintf(stderr, "A modloader is already installed\n"); return; }
-  SearchResult *result = NULL;
-  FILE *fp = fopen("instance.toml", "r+");
-  if (id != NULL) {
-    result = search_fabric(id);
-    if (result == NULL) {
-      fprintf(stderr, "Fabric Loader version %s not found\n", id);
-      fclose(fp);
-      m_exit(EX_DATAERR);
-    }
-    printf("Warning: you are using a non-latest Fabric Loader version, unexpected bugs may occur\n");
-    printf("Fabric Loader version %s found\n",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring);
-    char *value;
-    m_asprintf(&value, "fabric-loader = \"%s\"", cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring);
-    toml_add_table(fp, "[dependencies]", value);
-    free(value);
-    installVersion();
-    fclose(fp);
-    installDependencies();
-  } else {
-    result = search_fabric("");
-    if (result == NULL) {
-      fprintf(stderr, "Fabric Loader not found\n");
-      fclose(fp);
-      m_exit(EX_DATAERR);
-    }
-    printf("Latest Fabric Loader version %s found\n",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring);
-    char *value;
-    m_asprintf(&value, "fabric-loader = \"%s\"",
-      cJSON_GetObjectItemCaseSensitive(result->node[0], "loader")->valuestring);
-    toml_add_table(fp, "[dependencies]", value);
-    free(value);
-    installVersion();
-    fclose(fp);
-    installDependencies();
-  }
-  free_SearchResult(result);
-}
+void installForge(const char *id) { install_modloader("forge", "Forge", 0, id); }
+void installNeoforge(const char *id) { install_modloader("neoforge", "NeoForge", 0, id); }
+void installFabric(const char *id) { install_modloader("fabric-loader", "Fabric Loader", 1, id); }
 
 static int analyze(void) {
   result = toml_parse_file_ex("instance.toml");
@@ -250,12 +183,12 @@ static int analyze(void) {
 }
 
 static void installVersion() {
-  printf("[Install] 获取版本元数据: %s\n", version.u.s);
-  //package *version_pkg = get_version(version.u.s);
+  // package *version_pkg = get_version(version.u.s);
   SearchResult *version_search_result = search_version(version.u.s);
   if (version_search_result == NULL) {
     fprintf(stderr, "Error: Version %s not found\n"
-                    "Check your instance.toml or run moco update", version.u.s);
+                    "Check your instance.toml or run moco update",
+            version.u.s);
     m_exit(EX_DATAERR);
   }
   if (version_search_result->count != 1) {
@@ -273,10 +206,8 @@ static void installVersion() {
 
   cJSON *version_json = file_to_json(version_pkg->path);
 
-  printf("[Install] 提交基础组件下载任务（libraries / logging / client）\n");
   download_libraries(version_json);
 
-  printf("[Install] 提交 logging 配置下载任务\n");
   cJSON *logging_res = cJSON_GetObjectItemCaseSensitive(version_json, "logging");
   cJSON *logging_client_res = cJSON_GetObjectItemCaseSensitive(logging_res, "client");
   cJSON *logging_file_rs = cJSON_GetObjectItemCaseSensitive(logging_client_res, "file");
@@ -285,7 +216,7 @@ static void installVersion() {
   cJSON *logging_url = cJSON_GetObjectItemCaseSensitive(logging_file_rs, "url");
   package *logging_pkg = m_malloc(sizeof(package));
   char *path, *store;
-  m_asprintf(&path, ".minecraft/assets/log_configs/%s",logging_id->valuestring);
+  m_asprintf(&path, ".minecraft/assets/log_configs/%s", logging_id->valuestring);
   store = get_store_path(logging_sha1->valuestring);
   logging_pkg->store = store;
   logging_pkg->path = path;
@@ -294,7 +225,6 @@ static void installVersion() {
   submit_download_task(logging_pkg);
   free_package(logging_pkg);
 
-  printf("[Install] 提交 client 下载任务\n");
   cJSON *downloads_res = cJSON_GetObjectItemCaseSensitive(version_json, "downloads");
   cJSON *client_res = cJSON_GetObjectItemCaseSensitive(downloads_res, "client");
   cJSON *client_sha1_res = cJSON_GetObjectItemCaseSensitive(client_res, "sha1");
@@ -307,14 +237,13 @@ static void installVersion() {
   submit_download_task(client_pkg);
   free_package(client_pkg);
 
-  printf("[Install] 提交资源索引下载任务\n");
   cJSON *assetIndex_res = cJSON_GetObjectItemCaseSensitive(version_json, "assetIndex");
   cJSON *assetIndex_id_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "id");
   cJSON *assetIndex_sha1_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "sha1");
   cJSON *assetIndex_url_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "url");
   package *assetIndex_pkg = m_malloc(sizeof(package));
   char *assetIndex_path;
-  m_asprintf(&assetIndex_path, ".minecraft/assets/indexes/%s.json",assetIndex_id_res->valuestring);
+  m_asprintf(&assetIndex_path, ".minecraft/assets/indexes/%s.json", assetIndex_id_res->valuestring);
   assetIndex_pkg->path = m_strdup(assetIndex_path);
   free(assetIndex_path);
   assetIndex_pkg->url = m_strdup(assetIndex_url_res->valuestring);
@@ -324,13 +253,12 @@ static void installVersion() {
 
   wait_download_task(assetIndex_pkg->store);
 
-  printf("[Install] 提交资源对象下载任务\n");
   download_asset(assetIndex_pkg);
   free_package(assetIndex_pkg);
   cJSON_Delete(version_json);
   free_package(version_pkg);
 
-  printf("[Install] 基础组件已在后台下载，资源对象已开始提交\n");
+  wait_epoll_download_task();
 }
 
 static void download_asset(const package *assetIndex) {
@@ -415,8 +343,8 @@ int download_java() {
       m_asprintf(&url, "https://api.adoptium.net/v3/binary/latest/17/ga/linux/x64/jre/hotspot/normal/eclipse");
     else
       m_asprintf(&url,
-          "https://api.adoptium.net/v3/binary/latest/%d/ga/linux/x64/jre/hotspot/normal/eclipse",
-          majorVersion_res->valueint);
+                 "https://api.adoptium.net/v3/binary/latest/%d/ga/linux/x64/jre/hotspot/normal/eclipse",
+                 majorVersion_res->valueint);
     package *java = m_malloc(sizeof(package));
     java->url = url;
     java->store = m_strdup(".moco/java.tar.gz");
@@ -451,142 +379,137 @@ void installDependencies() {
     toml_free(r);
     return;
   }
-  printf("[Install] 解析依赖项\n");
-  if (check_modloader() > 1) {
-    fprintf(stderr, "Error: multiple modloaders detected, only one is allowed\n");
+  toml_datum_t loader_type = toml_seek(rt, "dependencies.loader");
+  toml_datum_t loader_ver = toml_seek(rt, "dependencies.loader_version");
+  if (loader_type.type != TOML_STRING) {
     toml_free(r);
     return;
   }
-  toml_datum_t forge = toml_seek(rt, "dependencies.forge");
-  toml_datum_t neoforge = toml_seek(rt, "dependencies.neoforge");
-  toml_datum_t fabric_loader = toml_seek(rt, "dependencies.fabric-loader");
-  toml_datum_t quilt_loader = toml_seek(rt, "dependencies.quilt-loader");
-  //TODO 本地化forge，neoforge安装
-  if (forge.type == TOML_STRING) {
-      //https://maven.minecraftforge.net/net/minecraftforge/forge/{MC版本}-{Forge版本}/forge-{MC版本}-{Forge版本}-installer.jar
-      if (download_java()!=0) {
-        fprintf(stderr, "Error downloading Java runtime, cannot continue installing Forge\n");
-        m_exit(EX_IOERR);
-      }
-      package *forge_installer_package = m_malloc(sizeof(package));
-      forge_installer_package->path = m_strdup(".moco/forge-installer.jar");
-      forge_installer_package->sha1 = m_strdup("-1");
-      forge_installer_package->store = m_strdup(".moco/forge-installer.jar");
-      char *url;
-      m_asprintf(&url,"https://maven.minecraftforge.net/net/minecraftforge/forge/%s-%s/forge-%s-%s-installer.jar",
-        ver.u.s, forge.u.s, ver.u.s, forge.u.s);
-      forge_installer_package->url = url;
-      submit_download_task(forge_installer_package);
-      wait_epoll_download_task();
-      free_package(forge_installer_package);
-
-      FILE *file = fopen(".minecraft/launcher_profiles.json","wb+");
-      fprintf(file,"{\n"
-                   "\t\"profiles\":{}\n"
-                   "}");
-      fclose(file);
-      system(".moco/java/bin/java -jar .moco/forge-installer.jar --installClient .minecraft");
+  // TODO 本地化forge，neoforge安装
+  if (strcmp(loader_type.u.s, "forge") == 0) {
+    // https://maven.minecraftforge.net/net/minecraftforge/forge/{MC版本}-{Forge版本}/forge-{MC版本}-{Forge版本}-installer.jar
+    if (download_java() != 0) {
+      fprintf(stderr, "Error downloading Java runtime, cannot continue installing Forge\n");
+      m_exit(EX_IOERR);
     }
-    if (neoforge.type == TOML_STRING) {
-      //if (strstr(version.u.s,"1.20.2")!=NULL || strstr(version.u.s,"1.20.3")!=NULL) {
-      //  fprintf(stderr,"Sorry,the neoforge 1.20.2/1.20.3 is too chaos,not be support\n");
-      //  m_exit(EX_DATAERR);
-      //}
-      //https://maven.neoforged.net/releases/net/neoforged/neoforge/[NeoForge版本号]/neoforge-[NeoForge版本号]-installer.jar
-      download_java();
-      package *neoforge_installer_package = m_malloc(sizeof(package));
-      neoforge_installer_package->path = m_strdup(".moco/neoforge-installer.jar");
-      neoforge_installer_package->sha1 = m_strdup("-1");
-      neoforge_installer_package->store = m_strdup(".moco/neoforge-installer.jar");
-      char *url;
-      m_asprintf(&url,"https://maven.neoforged.net/releases/net/neoforged/neoforge/%s/neoforge-%s-installer.jar",neoforge.u.s,neoforge.u.s);
-      neoforge_installer_package->url = url;
-      submit_download_task(neoforge_installer_package);
-      wait_epoll_download_task();
-      free_package(neoforge_installer_package);
-      FILE *file = fopen(".minecraft/launcher_profiles.json","wb+");
-      fprintf(file,"{\n"
-                   "\t\"profiles\":{}\n"
-                   "}");
-      fclose(file);
-      system(".moco/java/bin/java -jar .moco/neoforge-installer.jar --installClient .minecraft");
-    }
-    if (fabric_loader.type == TOML_STRING) {
-      printf("[Install] 提交 Fabric Loader 下载任务: %s\n", fabric_loader.u.s);
-      //  https://meta.fabricmc.net/v2/versions/loader/:game_version/:loader_version
-      package *fabric_loader_package = m_malloc(sizeof(package));
-      char *url;
-      m_asprintf(&url, "https://meta.fabricmc.net/v2/versions/loader/%s/%s/profile/json",ver.u.s,fabric_loader.u.s);
-      char *path;
-      m_asprintf(&path,".minecraft/versions/fabric-loader-%s-%s.json",fabric_loader.u.s,ver.u.s);
-      fabric_loader_package->path = path;
-      fabric_loader_package->sha1 = m_strdup("-1");
-      fabric_loader_package->url = url;
-      fabric_loader_package->store = m_strdup(path);
-      submit_download_task(fabric_loader_package);
-      wait_epoll_download_task();
+    package *forge_installer_package = m_malloc(sizeof(package));
+    forge_installer_package->path = m_strdup(".moco/forge-installer.jar");
+    forge_installer_package->sha1 = m_strdup("-1");
+    forge_installer_package->store = m_strdup(".moco/forge-installer.jar");
+    char *url;
+    m_asprintf(&url, "https://maven.minecraftforge.net/net/minecraftforge/forge/%s-%s/forge-%s-%s-installer.jar",
+               ver.u.s, loader_ver.u.s, ver.u.s, loader_ver.u.s);
+    forge_installer_package->url = url;
+    submit_download_task(forge_installer_package);
+    wait_epoll_download_task();
+    free_package(forge_installer_package);
 
-      cJSON *json = file_to_json(path);
-      free_package(fabric_loader_package);
-      char *inheritsFrom = cJSON_GetObjectItemCaseSensitive(json, "inheritsFrom")->valuestring;
-      if (strcmp(ver.u.s,inheritsFrom) != 0) {
-        fprintf(stderr, "Error: Fabric Loader version %s does not match game version %s\n", fabric_loader.u.s, ver.u.s);
-        cJSON_Delete(json);
-        m_exit(EX_DATAERR);
-      }
-      cJSON *libraries = cJSON_GetObjectItemCaseSensitive(json, "libraries");
-      cJSON *item;
-      package *libraries_package = m_malloc(sizeof(package));
-      cJSON_ArrayForEach(item,libraries) {
-        char *name = reMaven(cJSON_GetObjectItemCaseSensitive(item, "name")->valuestring);
-        char *path_l;
-        m_asprintf(&path_l, ".minecraft/libraries/%s", name);
-        char *url_l;
-        m_asprintf(&url_l,"https://maven.fabricmc.net/%s",name);
-        cJSON *sha1_l = cJSON_GetObjectItemCaseSensitive(item, "sha1");
+    FILE *file = fopen(".minecraft/launcher_profiles.json", "wb+");
+    fprintf(file, "{\n"
+                  "\t\"profiles\":{}\n"
+                  "}");
+    fclose(file);
+    system(".moco/java/bin/java -jar .moco/forge-installer.jar --installClient .minecraft");
+  }
+  if (strcmp(loader_type.u.s, "neoforge") == 0) {
+    // if (strstr(version.u.s,"1.20.2")!=NULL || strstr(version.u.s,"1.20.3")!=NULL) {
+    //   fprintf(stderr,"Sorry,the neoforge 1.20.2/1.20.3 is too chaos,not be support\n");
+    //   m_exit(EX_DATAERR);
+    // }
+    // https://maven.neoforged.net/releases/net/neoforged/neoforge/[NeoForge版本号]/neoforge-[NeoForge版本号]-installer.jar
+    download_java();
+    package *neoforge_installer_package = m_malloc(sizeof(package));
+    neoforge_installer_package->path = m_strdup(".moco/neoforge-installer.jar");
+    neoforge_installer_package->sha1 = m_strdup("-1");
+    neoforge_installer_package->store = m_strdup(".moco/neoforge-installer.jar");
+    char *url;
+    m_asprintf(&url, "https://maven.neoforged.net/releases/net/neoforged/neoforge/%s/neoforge-%s-installer.jar", loader_ver.u.s, loader_ver.u.s);
+    neoforge_installer_package->url = url;
+    submit_download_task(neoforge_installer_package);
+    wait_epoll_download_task();
+    free_package(neoforge_installer_package);
+    FILE *file = fopen(".minecraft/launcher_profiles.json", "wb+");
+    fprintf(file, "{\n"
+                  "\t\"profiles\":{}\n"
+                  "}");
+    fclose(file);
+    system(".moco/java/bin/java -jar .moco/neoforge-installer.jar --installClient .minecraft");
+  }
+  if (strcmp(loader_type.u.s, "fabric-loader") == 0) {
+    //  https://meta.fabricmc.net/v2/versions/loader/:game_version/:loader_version
+    package *fabric_loader_package = m_malloc(sizeof(package));
+    char *url;
+    m_asprintf(&url, "https://meta.fabricmc.net/v2/versions/loader/%s/%s/profile/json", ver.u.s, loader_ver.u.s);
+    char *path;
+    m_asprintf(&path, ".minecraft/versions/fabric-loader-%s-%s.json", loader_ver.u.s, ver.u.s);
+    fabric_loader_package->path = path;
+    fabric_loader_package->sha1 = m_strdup("-1");
+    fabric_loader_package->url = url;
+    fabric_loader_package->store = m_strdup(path);
+    submit_download_task(fabric_loader_package);
+    wait_epoll_download_task();
 
-        libraries_package->path = path_l;
-        libraries_package->url = url_l;
-        if (sha1_l != NULL) {
-          libraries_package->sha1 = m_strdup(sha1_l->valuestring);
-          libraries_package->store = get_store_path(sha1_l->valuestring);
-        }else {
-          libraries_package->sha1 = m_strdup("-1");
-          libraries_package->store = m_strdup(path_l);
-        }
-
-        submit_download_task(libraries_package);
-        free(name);
-        free(libraries_package->path);
-        free(libraries_package->sha1);
-        free(libraries_package->url);
-        free(libraries_package->store);
-      }
-      free(libraries_package);
+    cJSON *json = file_to_json(path);
+    free_package(fabric_loader_package);
+    char *inheritsFrom = cJSON_GetObjectItemCaseSensitive(json, "inheritsFrom")->valuestring;
+    if (strcmp(ver.u.s, inheritsFrom) != 0) {
+      fprintf(stderr, "Error: Fabric Loader version %s does not match game version %s\n", loader_ver.u.s, ver.u.s);
       cJSON_Delete(json);
+      m_exit(EX_DATAERR);
     }
-    if (quilt_loader.type == TOML_STRING) {
-      printf("此加载器方式暂时被搁置");
+    cJSON *libraries = cJSON_GetObjectItemCaseSensitive(json, "libraries");
+    cJSON *item;
+    package *libraries_package = m_malloc(sizeof(package));
+    cJSON_ArrayForEach(item, libraries) {
+      char *name = reMaven(cJSON_GetObjectItemCaseSensitive(item, "name")->valuestring);
+      char *path_l;
+      m_asprintf(&path_l, ".minecraft/libraries/%s", name);
+      char *url_l;
+      m_asprintf(&url_l, "https://maven.fabricmc.net/%s", name);
+      cJSON *sha1_l = cJSON_GetObjectItemCaseSensitive(item, "sha1");
+
+      libraries_package->path = path_l;
+      libraries_package->url = url_l;
+      if (sha1_l != NULL) {
+        libraries_package->sha1 = m_strdup(sha1_l->valuestring);
+        libraries_package->store = get_store_path(sha1_l->valuestring);
+      } else {
+        libraries_package->sha1 = m_strdup("-1");
+        libraries_package->store = m_strdup(path_l);
+      }
+
+      submit_download_task(libraries_package);
+      free(name);
+      free(libraries_package->path);
+      free(libraries_package->sha1);
+      free(libraries_package->url);
+      free(libraries_package->store);
     }
+    free(libraries_package);
+    cJSON_Delete(json);
+  }
+  if (strcmp(loader_type.u.s, "quilt-loader") == 0) {
+    printf("此加载器方式暂时被搁置");
+  }
   toml_free(r);
 }
 
 void installMods() {
   toml_result_t r = toml_parse_file_ex("instance.toml");
-  if (!r.ok) return;
+  if (!r.ok)
+    return;
   toml_datum_t rt = r.toptab;
   toml_datum_t mods = toml_seek(rt, "mods");
   if (mods.type != TOML_ARRAY) {
     toml_free(r);
     return;
   }
-  printf("[Install] 解析模组...\n");//TODO 重写cli输出
   package *mod_package = m_malloc(sizeof(package));
   for (int i = 0; i < mods.u.arr.size; i++) {
     toml_datum_t mod = mods.u.arr.elem[i];
-    mod_package->path = m_strdup(toml_get(mod,"path").u.s);
-    mod_package->sha1 = m_strdup(toml_get(mod,"sha1").u.s);
-    mod_package->url = m_strdup(toml_get(mod,"url").u.s);
+    mod_package->path = m_strdup(toml_get(mod, "path").u.s);
+    mod_package->sha1 = m_strdup(toml_get(mod, "sha1").u.s);
+    mod_package->url = m_strdup(toml_get(mod, "url").u.s);
     mod_package->store = get_store_path(mod_package->sha1);
     submit_download_task(mod_package);
     free(mod_package->path);

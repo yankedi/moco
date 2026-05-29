@@ -11,6 +11,7 @@ extern struct option cli_options[];
 extern struct option search_options[];
 extern struct option import_options[];
 extern struct option install_options[];
+extern struct option search_modrinth_options[];
 typedef struct {
   const char *const key;
   char *value;

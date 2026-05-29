@@ -19,6 +19,7 @@ set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
 set(TOMLC17_REPO "https://github.com/cktan/tomlc17.git" CACHE STRING "tomlc17 Git repository URL")
 set(CJSON_REPO "https://github.com/DaveGamble/cJSON.git" CACHE STRING "cJSON Git repository URL")
 set(kuba--/zip_REPO "https://github.com/kuba--/zip.git" CACHE STRING "kuba--/zip Git repository URL")
+set(NOTCURSES_REPO "https://github.com/dankamongmen/notcurses.git" CACHE STRING "notcurses Git repository URL")
 FetchContent_Declare(
         tomlc17
         GIT_REPOSITORY ${TOMLC17_REPO}
@@ -34,7 +35,19 @@ FetchContent_Declare(
         GIT_REPOSITORY ${kuba--/zip_REPO}
         GIT_TAG master
 )
-FetchContent_MakeAvailable(tomlc17 cjson zip)
+FetchContent_Declare(
+        notcurses
+        GIT_REPOSITORY ${NOTCURSES_REPO}
+        GIT_TAG master
+)
+set(BUILD_TESTING OFF CACHE BOOL "Disable tests" FORCE)
+set(USE_DOCTEST OFF CACHE BOOL "Disable doctest" FORCE)
+set(USE_MULTIMEDIA "none" CACHE STRING "Disable multimedia engine" FORCE)
+set(USE_DEFLATE OFF CACHE BOOL "Use zlib instead of libdeflate" FORCE)
+FetchContent_MakeAvailable(tomlc17 cjson zip notcurses)
+if(TARGET zip)
+  target_compile_options(zip PRIVATE -Wno-error)
+endif()
 
 if (NOT TARGET tomlc17)
     add_library(tomlc17 STATIC
@@ -85,6 +98,8 @@ add_executable(moco
         src/utility/minecraft/version.c
         src/utility/minecraft/version.c
         src/utility/minecraft/version.h
+        src/utility/modrinth/search.c
+        src/utility/modrinth/search.h
 )
 
 target_link_libraries(moco PRIVATE
@@ -94,10 +109,14 @@ target_link_libraries(moco PRIVATE
         zip
         OpenSSL::Crypto
         Threads::Threads
+        notcurses-core-static
+        z
 )
 
 target_include_directories(moco PRIVATE
         "${PROJECT_SOURCE_DIR}/src"
         "${PROJECT_BINARY_DIR}"
         "${cjson_SOURCE_DIR}"   #wait https://github.com/DaveGamble/cJSON/issues/816 to fix the issue of cJSON_INCLUDE_DIRS not being set
+        "${notcurses_SOURCE_DIR}/include"
+        "${PROJECT_SOURCE_DIR}/src/tui"
 )

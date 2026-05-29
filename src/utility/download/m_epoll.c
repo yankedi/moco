@@ -25,6 +25,9 @@
 #include "utility/store/store.h"
 
 #include <curl/curl.h>
+#include <notcurses/notcurses.h>
+#include <stdatomic.h>
+#include <time.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -32,7 +35,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
-#include <sys/ioctl.h>
 #include <sys/timerfd.h>
 #include <sysexits.h>
 #include <unistd.h>
@@ -42,9 +44,16 @@
 #define M_MULTI_MAX_HOST_CONN 6L
 #define M_MULTI_MAX_CACHE_CONN 32L
 
-int g_task_pipe_write_fd = -1;
-pthread_t epoll_download_thread_id;
-volatile EpollSignal g_epoll_signal = EPOLL_SIGNAL_RUN;
+static int g_task_pipe_write_fd = -1;
+static pthread_t epoll_download_thread_id;
+static volatile EpollSignal g_epoll_signal = EPOLL_SIGNAL_RUN;
+
+static _Atomic int g_dl_total = 0;
+static _Atomic int g_dl_done = 0;
+static _Atomic int g_dl_linked = 0;
+static _Atomic int g_dl_retry = 0;
+static char g_dl_done_log[64][256];
+static _Atomic int g_dl_done_log_pos = 0;
 
 typedef struct {
   int epoll_fd;
@@ -62,21 +71,9 @@ typedef struct {
   package *p;
 } ConnInfo;
 
-typedef struct {
-  int enabled;
-  int rows;
-  int cols;
-  unsigned long total;
-  unsigned long done;
-  unsigned long linked;
-  unsigned long retry;
-} ProgressUI;
-
-static ProgressUI g_progress = {0};
-static pthread_mutex_t g_progress_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_pending_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_pending_cond = PTHREAD_COND_INITIALIZER;
-static unsigned long g_pending_tasks = 0;
+static _Atomic unsigned long g_pending_tasks = 0;
 
 typedef struct DoneNode {
   char *store;
@@ -159,118 +156,83 @@ static void free_conninfo(ConnInfo *conn) {
   free(conn);
 }
 
-static void progress_render_locked(const int running_handles) {
-  if (!g_progress.enabled) {
-    return;
-  }
+// TUI
+static struct notcurses *tui_nc;
+static struct ncprogbar *tui_pbar;
+static struct ncplane *tui_list, *tui_info;
+static int tui_list_h, tui_r, tui_g, tui_b;
 
-  const int total = (int)g_progress.total;
-  const int done = (int)g_progress.done;
-  const int linked = (int)g_progress.linked;
-  const int retry = (int)g_progress.retry;
-  const int cols = g_progress.cols > 0 ? g_progress.cols : 100;
-  int bar_width = cols - 45;
-  if (bar_width < 10)
-    bar_width = 10;
-  if (bar_width > 50)
-    bar_width = 50;
-
-  int filled = 0;
-  double percent = 0.0;
-  if (total > 0) {
-    percent = ((double)done * 100.0) / (double)total;
-    filled = (int)((double)done * (double)bar_width / (double)total);
-    if (filled > bar_width)
-      filled = bar_width;
-  }
-
-  char bar[64];
-  for (int i = 0; i < bar_width; ++i) {
-    bar[i] = i < filled ? '#' : '-';
-  }
-  bar[bar_width] = '\0';
-
-  printf("\0337");
-  printf("\033[%d;1H\033[2K", g_progress.rows);
-  printf("\033[1;36m任务进度\033[0m [%s] %d/%d %5.1f%% run:%d link:%d retry:%d",
-         bar, done, total, percent, running_handles, linked, retry);
-  printf("\0338");
-  fflush(stdout);
+static void tui_init(void) {
+  notcurses_options o = {.flags = NCOPTION_SUPPRESS_BANNERS};
+  tui_nc = notcurses_core_init(&o, NULL);
+  if (!tui_nc) return;
+  unsigned dimy, dimx;
+  struct ncplane *std = notcurses_stddim_yx(tui_nc, &dimy, &dimx);
+  int pg_h = 1, info_h = 1;
+  tui_list_h = dimy - pg_h - info_h - 1;
+  tui_list = ncplane_create(std,
+    &(struct ncplane_options){.y=1,.x=1,.rows=tui_list_h,.cols=dimx-2});
+  tui_info = ncplane_create(std,
+    &(struct ncplane_options){.y=dimy-pg_h-info_h,.x=1,.rows=info_h,.cols=dimx-2});
+  struct ncplane *pgp = ncplane_create(std,
+    &(struct ncplane_options){.y=dimy-pg_h,.x=1,.rows=pg_h,.cols=dimx-2});
+  ncplane_set_base(pgp, "", 0, 0);
+  tui_r = 99; tui_g = 176; tui_b = 248;
+  ncprogbar_options po = {};
+  ncchannel_set_rgb8(&po.ulchannel,tui_r,tui_g,tui_b);
+  ncchannel_set_rgb8(&po.urchannel,tui_r,tui_g,tui_b);
+  ncchannel_set_rgb8(&po.blchannel,(int)(tui_r*.35),(int)(tui_g*.35),(int)(tui_b*.35));
+  ncchannel_set_rgb8(&po.brchannel,(int)(tui_r*.35),(int)(tui_g*.35),(int)(tui_b*.35));
+  tui_pbar = ncprogbar_create(pgp, &po);
 }
 
-static void progress_init(void) {
-  if (!isatty(STDOUT_FILENO)) {
-    return;
+static void tui_render_frame(void) {
+  ncplane_erase(tui_list);
+  int tp = g_dl_done_log_pos, rows = tp > tui_list_h ? tui_list_h : tp;
+  for (int i = 0; i < rows; i++) {
+    int idx = (tp - 1 - i) % 64, c = 200 - (i * 200 / rows);
+    if (c < 50) c = 50;
+    ncplane_set_fg_rgb8(tui_list, c, c, c);
+    ncplane_printf_yx(tui_list, tui_list_h - 1 - i, 1, " %s", g_dl_done_log[idx]);
   }
-
-  struct winsize ws;
-  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0 || ws.ws_row < 2) {
-    return;
+  double pct = g_dl_total > 0 ? (double)g_dl_done/(double)g_dl_total : 0;
+  ncprogbar_set_progress(tui_pbar, pct);
+  ncplane_set_fg_rgb8(tui_info, tui_r, tui_g, tui_b);
+  ncplane_printf_yx(tui_info, 0, 1, "Download: %d/%d  %.1f%%", g_dl_done, g_dl_total, pct*100);
+  ncplane_set_fg_rgb8(tui_info, 100, 200, 100);
+  ncplane_printf_yx(tui_info, 0, 45, "Linked: %d", g_dl_linked);
+  if (g_dl_retry) {
+    ncplane_set_fg_rgb8(tui_info, 255, 100, 100);
+    ncplane_printf_yx(tui_info, 0, 62, "Retry: %d", g_dl_retry);
   }
-
-  pthread_mutex_lock(&g_progress_lock);
-  g_progress.enabled = 1;
-  g_progress.rows = ws.ws_row;
-  g_progress.cols = ws.ws_col;
-  g_progress.total = 0;
-  g_progress.done = 0;
-  g_progress.linked = 0;
-  g_progress.retry = 0;
-
-  // Keep the last terminal line as a fixed status line.
-  printf("\033[?25l");
-  printf("\033[1;%dr", g_progress.rows - 1);
-  printf("\033[%d;1H\033[2K", g_progress.rows);
-  printf("\033[1;1H");
-  progress_render_locked(0);
-  pthread_mutex_unlock(&g_progress_lock);
-  fflush(stdout);
 }
 
-static void progress_on_submit(void) {
-  if (!g_progress.enabled) {
-    progress_init();
-  }
-  pthread_mutex_lock(&g_progress_lock);
-  g_progress.total++;
-  progress_render_locked(0);
-  pthread_mutex_unlock(&g_progress_lock);
+static void tui_render(void) {
+  if (!tui_nc) return;
+  tui_render_frame();
+  notcurses_render(tui_nc);
 }
 
-static void progress_on_link(const int running_handles) {
-  pthread_mutex_lock(&g_progress_lock);
-  g_progress.linked++;
-  progress_render_locked(running_handles);
-  pthread_mutex_unlock(&g_progress_lock);
+static void tui_shutdown(void) {
+  if (!tui_nc) return;
+  ncprogbar_destroy(tui_pbar);
+  notcurses_stop(tui_nc); tui_nc = NULL;
+  printf("Downloaded: %d  Linked: %d  Total: %d\n", g_dl_done, g_dl_linked, g_dl_done + g_dl_linked);
 }
 
-static void progress_on_retry(const int running_handles) {
-  pthread_mutex_lock(&g_progress_lock);
-  g_progress.retry++;
-  progress_render_locked(running_handles);
-  pthread_mutex_unlock(&g_progress_lock);
+static inline void dl_on_submit(const char *path) {
+  (void)path;
+  g_dl_total++;
+  if (!tui_nc) tui_init();
 }
 
-static void progress_on_done(const int running_handles) {
-  pthread_mutex_lock(&g_progress_lock);
-  g_progress.done++;
-  progress_render_locked(running_handles);
-  pthread_mutex_unlock(&g_progress_lock);
+static inline void dl_on_done(const char *path) {
+  g_dl_done++;
+  int pos = g_dl_done_log_pos++ % 64;
+  snprintf(g_dl_done_log[pos], sizeof(g_dl_done_log[0]), "%.240s", path);
 }
 
-static void progress_shutdown(const int running_handles) {
-  pthread_mutex_lock(&g_progress_lock);
-  if (g_progress.enabled) {
-    progress_render_locked(running_handles);
-    printf("\033[r");
-    printf("\033[%d;1H\033[2K", g_progress.rows);
-    printf("\033[?25h");
-    fflush(stdout);
-  }
-  g_progress.enabled = 0;
-  pthread_mutex_unlock(&g_progress_lock);
-}
-
+static inline void dl_on_retry(void) { g_dl_retry++; }
 static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *data) {
   ConnInfo *conn = data;
   if (!conn->fp) {
@@ -399,7 +361,7 @@ static void check_multi_info(EpollInfo *ep) {
         if (conn->p->path && strcmp(conn->p->store, conn->p->path) != 0) {
           link_mkdir(conn->p->store, conn->p->path);
           if (access(conn->p->path, F_OK) == 0) {
-            progress_on_link(ep->running_handles);
+            g_dl_linked++;
             success = 1;
           }
         } else {
@@ -414,7 +376,7 @@ static void check_multi_info(EpollInfo *ep) {
         }
       }
       if (success) {
-        progress_on_done(ep->running_handles);
+        dl_on_done(conn->p->path);
         pending_task_finished();
         record_download_done(conn->p->store);
       } else {
@@ -435,7 +397,7 @@ static void check_multi_info(EpollInfo *ep) {
           p_copy->sha1 = m_strdup(conn->p->sha1);
           p_copy->store = m_strdup(conn->p->store);
           add_download(ep, p_copy);
-          progress_on_retry(ep->running_handles);
+          dl_on_retry();
         } else {
           fprintf(stderr, "[失败] 重试包分配失败: %s\n", conn->p->url);
           pending_task_finished();
@@ -456,10 +418,11 @@ static void check_multi_info(EpollInfo *ep) {
 void submit_download_task(package *p) {
   if (g_task_pipe_write_fd == -1)
     return;
-  if (access(p->store, F_OK) == 0) { // 缓存命中
+  if (access(p->store, F_OK) == 0) { // cache hit
     if (p->path && strcmp(p->store, p->path) != 0) {
       link_mkdir(p->store, p->path);
     }
+    g_dl_linked++;
     record_download_done(p->store);
     return;
   }
@@ -476,7 +439,7 @@ void submit_download_task(package *p) {
     free_package(p_copy);
   } else {
     pending_task_submitted();
-    progress_on_submit();
+    dl_on_submit(p->path);
   }
 }
 
@@ -580,7 +543,7 @@ void *epoll_download(void *arg) {
     check_multi_info(&ep);
   }
   curl_multi_cleanup(ep.multi);
-  progress_shutdown(ep.running_handles);
+
   close(ep.epoll_fd);
   close(ep.timer_fd);
   close(pipe_read_fd);
@@ -602,9 +565,17 @@ void init_epoll_download_task() {
 void wait_epoll_download_task() {
   pthread_mutex_lock(&g_pending_lock);
   while (g_pending_tasks > 0) {
-    pthread_cond_wait(&g_pending_cond, &g_pending_lock);
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_nsec += 16666667; // 60fps
+    if (ts.tv_nsec >= 1000000000) { ts.tv_sec++; ts.tv_nsec -= 1000000000; }
+    pthread_cond_timedwait(&g_pending_cond, &g_pending_lock, &ts);
+    pthread_mutex_unlock(&g_pending_lock);
+    if (tui_nc) tui_render();
+    pthread_mutex_lock(&g_pending_lock);
   }
   pthread_mutex_unlock(&g_pending_lock);
+  tui_shutdown();
 }
 
 void wait_download_task(const char *store) {
@@ -613,7 +584,15 @@ void wait_download_task(const char *store) {
   }
   pthread_mutex_lock(&g_pending_lock);
   while (!has_download_done_locked(store)) {
-    pthread_cond_wait(&g_pending_cond, &g_pending_lock);
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_nsec += 16666667;
+    if (ts.tv_nsec >= 1000000000) { ts.tv_sec++; ts.tv_nsec -= 1000000000; }
+    pthread_cond_timedwait(&g_pending_cond, &g_pending_lock, &ts);
+    if (has_download_done_locked(store)) break;
+    pthread_mutex_unlock(&g_pending_lock);
+    if (tui_nc) tui_render();
+    pthread_mutex_lock(&g_pending_lock);
   }
   pthread_mutex_unlock(&g_pending_lock);
 }
@@ -625,5 +604,6 @@ void stop_epoll_download_task() {
     g_task_pipe_write_fd = -1;
   }
   pthread_join(epoll_download_thread_id, NULL);
+  tui_shutdown();
   clear_done_list();
 }

@@ -4,7 +4,6 @@
 
 #include "start.h"
 #include "cJSON.h"
-#include "command/install/install.h"
 #include "command/login/oauth2.h"
 #include "config.h"
 #include "interface.h"
@@ -20,7 +19,6 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <sysexits.h>
-#include <time.h>
 #include <unistd.h>
 
 static toml_result_t result;
@@ -28,10 +26,10 @@ static toml_result_t account_r;
 static toml_result_t profile_r;
 static toml_result_t instance_r;
 
-cJSON *version_json;
+static cJSON *version_json;
 
-char *java_path;
-char *mainClass;
+static char *java_path;
+static char *mainClass;
 
 struct start_args {
   char **value;
@@ -49,17 +47,17 @@ static struct start_args jvm = {NULL, 0};
 static struct start_args game = {NULL, 0};
 static struct start_args duj = {NULL, 0};
 
-char *jvm_a_Xms;
-char *jvm_a_Xmx;
+static char *jvm_a_Xms;
+static char *jvm_a_Xmx;
 
-m_string jvm_a[] = {
+static m_string jvm_a[] = {
   {"${natives_directory}", NULL},
   {"${launcher_name}", NULL},
   {"${launcher_version}", NULL},
   {"${classpath}", NULL}
 };
 
-m_string game_a[] = {
+static m_string game_a[] = {
   {"${auth_player_name}", NULL},
   {"${version_name}", NULL},
   {"${game_directory}", NULL},
@@ -288,19 +286,18 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
         }
 
 
-        toml_datum_t forge = toml_seek(instance_root, "dependencies.forge");
-        toml_datum_t neoforge = toml_seek(instance_root, "dependencies.neoforge");
-        toml_datum_t fabric_loader = toml_seek(instance_root, "dependencies.fabric-loader");
-        toml_datum_t quilt_loader = toml_seek(instance_root, "dependencies.quilt-loader");
+        toml_datum_t loader_type = toml_seek(instance_root, "dependencies.loader");
+        toml_datum_t loader_ver  = toml_seek(instance_root, "dependencies.loader_version");
+        if (loader_type.type == TOML_STRING) {
         //TODO 应写为只允许加载一个
-        if (forge.type == TOML_STRING || neoforge.type == TOML_STRING) {
+        if (strcmp(loader_type.u.s, "forge") == 0 || strcmp(loader_type.u.s, "neoforge") == 0) {
           char *name;
-          if (forge.type == TOML_STRING) {
-            printf("Forge modloader detected: %s\n", forge.u.s);
-            m_asprintf(&name, "%s-forge-%s", game_a[1].value, forge.u.s);
+          if (strcmp(loader_type.u.s, "forge") == 0) {
+            printf("Forge modloader detected: %s\n", loader_ver.u.s);
+            m_asprintf(&name, "%s-forge-%s", game_a[1].value, loader_ver.u.s);
           } else {
-            printf("NeoForge modloader detected: %s\n", neoforge.u.s);
-            m_asprintf(&name, "neoforge-%s", neoforge.u.s);
+            printf("NeoForge modloader detected: %s\n", loader_ver.u.s);
+            m_asprintf(&name, "neoforge-%s", loader_ver.u.s);
           }
 
           char *json_path;
@@ -353,10 +350,10 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
           cJSON_Delete(modloader_json);
           free(name);
         }
-        if (fabric_loader.type == TOML_STRING) {
-          printf("Fabric Loader modloader detected: %s\n", fabric_loader.u.s);
+        if (strcmp(loader_type.u.s, "fabric-loader") == 0) {
+          printf("Fabric Loader modloader detected: %s\n", loader_ver.u.s);
           char *fabric_loader_json_path;
-          m_asprintf(&fabric_loader_json_path,".minecraft/versions/fabric-loader-%s-%s.json",fabric_loader.u.s,game_a[1].value);
+          m_asprintf(&fabric_loader_json_path,".minecraft/versions/fabric-loader-%s-%s.json",loader_ver.u.s,game_a[1].value);
           cJSON *fabric_loader_json = file_to_json(fabric_loader_json_path);
           free(fabric_loader_json_path);
           cJSON *fabric_libraries_res = cJSON_GetObjectItemCaseSensitive(fabric_loader_json, "libraries");
@@ -375,13 +372,14 @@ static int analyze(void) {//TODO 重构为反箭头格式为卫语句
             add_arg(&jvm, item->valuestring);
           cJSON_Delete(fabric_loader_json);
         }
-        if (quilt_loader.type == TOML_STRING) {
-          printf("Quilt Loader modloader detected: %s\n", quilt_loader.u.s);
+        if (strcmp(loader_type.u.s, "quilt-loader") == 0) {
+          printf("Quilt Loader modloader detected: %s\n", loader_ver.u.s);
         }
 
-        if (forge.type != TOML_STRING && neoforge.type != TOML_STRING) {
+        if (strcmp(loader_type.u.s, "forge") != 0 && strcmp(loader_type.u.s, "neoforge") != 0) {
           cp_append(&jvm_a[3].value, cwd, ".minecraft/versions/version/version.jar");
         }
+        } // loader_type.type == TOML_STRING
         // jvm
         cJSON_ArrayForEach(item, version_arguments_jvm_json) {
           if (item->type == cJSON_String) {
