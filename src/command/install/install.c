@@ -30,10 +30,9 @@ static int total = 0;
 // static void switchSource();
 static int analyze(void);
 static void installVersion(void);
-static void download_asset(const package *assetIndex);
+static void download_asset(const Package *assetIndex);
 static void download_libraries(const cJSON *version_json);
 static int download_java();
-static void installDependencies(void);
 static void installMods(void);
 static int check_modloader(void);
 static void installForge(const char *id);
@@ -45,7 +44,7 @@ void install(int argc, char *argv[]) {
     m_exit(EX_DATAERR);
   }
   if (argc == 1) {
-    installVersion();
+    installVersion_n();
     installDependencies();
     installMods();
   }
@@ -151,7 +150,7 @@ static void install_modloader(const char *key, const char *name, int is_fabric,
   char *lv;
   m_asprintf(&lv, "loader = \"%s\"\nloader_version = \"%s\"",
              key, cJSON_GetObjectItemCaseSensitive(result->node[0], "loader_version")->valuestring);
-  toml_add_table(fp, "[dependencies]", lv);
+  toml_add_on_table(fp, "[dependencies]", lv);
   free(lv);
   installVersion();
   fclose(fp);
@@ -181,9 +180,196 @@ static int analyze(void) {
   }
   return 0;
 }
+/**
+ *
+ * @return 0 on success, 1 on failure
+ */
+int installVersion_n(void) {
+  int rc = 0;
+  toml_result_t instance = {0};
+  SearchResult *result = NULL;
+  Package *version_pkg = NULL;
+  cJSON *version_json = NULL;
+  FILE *lock_f = NULL;
+  toml_result_t lock = {0};
+
+  if (access("instance.toml", F_OK) != 0) {
+    rc = 1;
+    goto cleanup;
+  }
+  lock = toml_parse_file_ex("instance-lock.toml");
+  toml_datum_t version_l = toml_seek(lock.toptab, "version");
+  if (version_l.type == TOML_STRING) {
+    printf("Version %s is already installed.\n", version_l.u.s);
+    goto cleanup;
+  }
+  instance = toml_parse_file_ex("instance.toml");
+  if (!instance.ok) {
+    fprintf(stderr, "Error opening instance.toml: %s\n", instance.errmsg);
+    rc = 1;
+    goto cleanup;
+  }
+  toml_datum_t instance_r = instance.toptab;
+  toml_datum_t version_n = toml_seek(instance_r, "game.version");
+  if (version_n.type != TOML_STRING) {
+    fprintf(stderr, "The game version must be enclosed in quotation marks.\n");
+    rc = 1;
+    goto cleanup;
+  }
+  if (has_version(version_n.u.s) != 0) {
+    fprintf(stderr, "Minecraft version %s not found\n", version_n.u.s);
+    rc = 1;
+    goto cleanup;
+  }
+  result = search_version(version_n.u.s);
+  if (result == NULL || result->count != 1) {
+    fprintf(stderr, "Error: Version %s non-exact match\n", version_n.u.s);
+    rc = 1;
+    goto cleanup;
+  }
+
+  version_pkg = m_malloc(sizeof(Package));
+  version_pkg->url = m_strdup(cJSON_GetObjectItemCaseSensitive(result->node[0], "url")->valuestring);
+  version_pkg->sha1 = m_strdup(cJSON_GetObjectItemCaseSensitive(result->node[0], "sha1")->valuestring);
+  version_pkg->path = m_strdup(".minecraft/versions/version.json");
+  version_pkg->store = get_store_path(version_pkg->sha1);
+  free_SearchResult(result);
+  result = NULL;
+  submit_download_task(version_pkg);
+  wait_download_task(version_pkg->store);
+
+  version_json = file_to_json(version_pkg->path);
+  //libraries
+  cJSON *libraries_res = cJSON_GetObjectItemCaseSensitive(version_json, "libraries");
+  Package *library = m_malloc(sizeof(Package));
+  cJSON *lib_item = NULL;
+  cJSON_ArrayForEach(lib_item, libraries_res) {
+    int flag = 1;
+    cJSON *rules_res = cJSON_GetObjectItemCaseSensitive(lib_item, "rules");
+    cJSON *rule_res = cJSON_GetArrayItem(rules_res, 0);
+    cJSON *os_res = cJSON_GetObjectItemCaseSensitive(rule_res, "os");
+    cJSON *name_res = cJSON_GetObjectItemCaseSensitive(os_res, "name");
+    if (name_res)
+      if (strcmp(name_res->valuestring, "linux") != 0)
+        flag = 0;
+    if (flag) {
+      cJSON *download_res = cJSON_GetObjectItemCaseSensitive(lib_item, "downloads");
+      cJSON *artifact_res = cJSON_GetObjectItemCaseSensitive(download_res, "artifact");
+      cJSON *path_res = cJSON_GetObjectItemCaseSensitive(artifact_res, "path");
+      cJSON *sha1_res = cJSON_GetObjectItemCaseSensitive(artifact_res, "sha1");
+      cJSON *url_res = cJSON_GetObjectItemCaseSensitive(artifact_res, "url");
+      char *lib_path, *lib_store;
+      m_asprintf(&lib_path, ".minecraft/libraries/%s", path_res->valuestring);
+      lib_store = get_store_path(sha1_res->valuestring);
+      library->store = lib_store;
+      library->path = lib_path;
+      library->sha1 = m_strdup(sha1_res->valuestring);
+      library->url = m_strdup(url_res->valuestring);
+      submit_download_task(library);
+      free(library->store);
+      free(library->path);
+      free(library->sha1);
+      free(library->url);
+    }
+  }
+  free(library);
+  //logging
+  cJSON *logging_res = cJSON_GetObjectItemCaseSensitive(version_json, "logging");
+  cJSON *logging_client_res = cJSON_GetObjectItemCaseSensitive(logging_res, "client");
+  cJSON *logging_file_rs = cJSON_GetObjectItemCaseSensitive(logging_client_res, "file");
+  cJSON *logging_id = cJSON_GetObjectItemCaseSensitive(logging_file_rs, "id");
+  cJSON *logging_sha1 = cJSON_GetObjectItemCaseSensitive(logging_file_rs, "sha1");
+  cJSON *logging_url = cJSON_GetObjectItemCaseSensitive(logging_file_rs, "url");
+  Package *logging_pkg = m_malloc(sizeof(Package));
+  char *log_path;
+  m_asprintf(&log_path, ".minecraft/assets/log_configs/%s", logging_id->valuestring);
+  logging_pkg->store = get_store_path(logging_sha1->valuestring);
+  logging_pkg->path = log_path;
+  logging_pkg->sha1 = m_strdup(logging_sha1->valuestring);
+  logging_pkg->url = m_strdup(logging_url->valuestring);
+  submit_download_task(logging_pkg);
+  free_package(logging_pkg);
+  //version.jar
+  cJSON *downloads_res = cJSON_GetObjectItemCaseSensitive(version_json, "downloads");
+  cJSON *client_res = cJSON_GetObjectItemCaseSensitive(downloads_res, "client");
+  cJSON *client_sha1_res = cJSON_GetObjectItemCaseSensitive(client_res, "sha1");
+  cJSON *client_url_res = cJSON_GetObjectItemCaseSensitive(client_res, "url");
+  Package *client_pkg = m_malloc(sizeof(Package));
+  client_pkg->path = m_strdup(".minecraft/versions/version/version.jar");
+  client_pkg->sha1 = m_strdup(client_sha1_res->valuestring);
+  client_pkg->url = m_strdup(client_url_res->valuestring);
+  client_pkg->store = get_store_path(client_pkg->sha1);
+  submit_download_task(client_pkg);
+  free_package(client_pkg);
+  //asset
+  cJSON *assetIndex_res = cJSON_GetObjectItemCaseSensitive(version_json, "assetIndex");
+  cJSON *assetIndex_id_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "id");
+  cJSON *assetIndex_sha1_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "sha1");
+  cJSON *assetIndex_url_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "url");
+  Package *assetIndex_pkg = m_malloc(sizeof(Package));
+  char *assetIndex_path;
+  m_asprintf(&assetIndex_path, ".minecraft/assets/indexes/%s.json", assetIndex_id_res->valuestring);
+  assetIndex_pkg->path = m_strdup(assetIndex_path);
+  free(assetIndex_path);
+  assetIndex_pkg->url = m_strdup(assetIndex_url_res->valuestring);
+  assetIndex_pkg->sha1 = m_strdup(assetIndex_sha1_res->valuestring);
+  assetIndex_pkg->store = get_store_path(assetIndex_pkg->sha1);
+  submit_download_task(assetIndex_pkg);
+  wait_download_task(assetIndex_pkg->store);
+
+  cJSON *asset_json = file_to_json(assetIndex_pkg->path);
+  if (!asset_json) {
+    fprintf(stderr, "Error analyze assetIndex.json\n");
+    rc = 1;
+    goto cleanup;
+  }
+  cJSON *objects_res = cJSON_GetObjectItem(asset_json, "objects");
+  cJSON *asset_item = NULL;
+  Package *asset_pack = m_malloc(sizeof(Package));
+  cJSON_ArrayForEach(asset_item, objects_res) {
+    cJSON *hash_res = cJSON_GetObjectItemCaseSensitive(asset_item, "hash");
+    asset_pack->sha1 = m_strdup(hash_res->valuestring);
+    char *asset_url;
+    m_asprintf(&asset_url, "https://resources.download.minecraft.net/%c%c/%s",
+               hash_res->valuestring[0],
+               hash_res->valuestring[1],
+               hash_res->valuestring);
+    asset_pack->url = asset_url;
+    char *asset_path;
+    m_asprintf(&asset_path, ".minecraft/assets/objects/%c%c/%s",
+               hash_res->valuestring[0],
+               hash_res->valuestring[1],
+               hash_res->valuestring);
+    asset_pack->path = asset_path;
+    asset_pack->store = get_store_path(asset_pack->sha1);
+    submit_download_task(asset_pack);
+    free(asset_pack->store);
+    free(asset_pack->path);
+    free(asset_pack->sha1);
+    free(asset_pack->url);
+  }
+  free(asset_pack);
+  cJSON_Delete(asset_json);
+
+  free_package(assetIndex_pkg);
+
+  wait_epoll_download_task();
+  if (access("instance-lock.toml",F_OK) != 0) fclose(fopen("instance-lock.toml", "w"));
+  lock_f = fopen("instance-lock.toml","rb+");
+  toml_add_on_toptab(lock_f,"version",version_n.u.s);
+
+cleanup:
+  toml_free(lock);
+  if (lock_f) fclose(lock_f);
+  cJSON_Delete(version_json);
+  free_package(version_pkg);
+  free_SearchResult(result);
+  toml_free(instance);
+  return rc;
+}
 
 static void installVersion() {
-  // package *version_pkg = get_version(version.u.s);
+  // Package *version_pkg = get_version(version.u.s);
   SearchResult *version_search_result = search_version(version.u.s);
   if (version_search_result == NULL) {
     fprintf(stderr, "Error: Version %s not found\n"
@@ -195,7 +381,7 @@ static void installVersion() {
     fprintf(stderr, "Error: Version %s non-exact match\n", version.u.s);
     m_exit(EX_DATAERR);
   }
-  package *version_pkg = m_malloc(sizeof(package));
+  Package *version_pkg = m_malloc(sizeof(Package));
   version_pkg->url = m_strdup(cJSON_GetObjectItemCaseSensitive(version_search_result->node[0], "url")->valuestring);
   version_pkg->sha1 = m_strdup(cJSON_GetObjectItemCaseSensitive(version_search_result->node[0], "sha1")->valuestring);
   version_pkg->path = m_strdup(".minecraft/versions/version.json");
@@ -214,7 +400,7 @@ static void installVersion() {
   cJSON *logging_id = cJSON_GetObjectItemCaseSensitive(logging_file_rs, "id");
   cJSON *logging_sha1 = cJSON_GetObjectItemCaseSensitive(logging_file_rs, "sha1");
   cJSON *logging_url = cJSON_GetObjectItemCaseSensitive(logging_file_rs, "url");
-  package *logging_pkg = m_malloc(sizeof(package));
+  Package *logging_pkg = m_malloc(sizeof(Package));
   char *path, *store;
   m_asprintf(&path, ".minecraft/assets/log_configs/%s", logging_id->valuestring);
   store = get_store_path(logging_sha1->valuestring);
@@ -229,7 +415,7 @@ static void installVersion() {
   cJSON *client_res = cJSON_GetObjectItemCaseSensitive(downloads_res, "client");
   cJSON *client_sha1_res = cJSON_GetObjectItemCaseSensitive(client_res, "sha1");
   cJSON *client_url_res = cJSON_GetObjectItemCaseSensitive(client_res, "url");
-  package *client_pkg = m_malloc(sizeof(package));
+  Package *client_pkg = m_malloc(sizeof(Package));
   client_pkg->path = m_strdup(".minecraft/versions/version/version.jar");
   client_pkg->sha1 = m_strdup(client_sha1_res->valuestring);
   client_pkg->url = m_strdup(client_url_res->valuestring);
@@ -241,7 +427,7 @@ static void installVersion() {
   cJSON *assetIndex_id_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "id");
   cJSON *assetIndex_sha1_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "sha1");
   cJSON *assetIndex_url_res = cJSON_GetObjectItemCaseSensitive(assetIndex_res, "url");
-  package *assetIndex_pkg = m_malloc(sizeof(package));
+  Package *assetIndex_pkg = m_malloc(sizeof(Package));
   char *assetIndex_path;
   m_asprintf(&assetIndex_path, ".minecraft/assets/indexes/%s.json", assetIndex_id_res->valuestring);
   assetIndex_pkg->path = m_strdup(assetIndex_path);
@@ -261,12 +447,12 @@ static void installVersion() {
   wait_epoll_download_task();
 }
 
-static void download_asset(const package *assetIndex) {
+static void download_asset(const Package *assetIndex) {
   cJSON *asset_json = file_to_json(assetIndex->path);
   if (asset_json) {
     cJSON *objects_res = cJSON_GetObjectItem(asset_json, "objects");
     cJSON *item = NULL;
-    package *pack = malloc(sizeof(package));
+    Package *pack = malloc(sizeof(Package));
     cJSON_ArrayForEach(item, objects_res) {
       cJSON *hash_res = cJSON_GetObjectItemCaseSensitive(item, "hash");
       char *url;
@@ -299,7 +485,7 @@ static void download_asset(const package *assetIndex) {
 
 static void download_libraries(const cJSON *version_json) {
   const cJSON *libraries_res = cJSON_GetObjectItemCaseSensitive(version_json, "libraries");
-  package *library = m_malloc(sizeof(package));
+  Package *library = m_malloc(sizeof(Package));
   cJSON *item = NULL;
   cJSON_ArrayForEach(item, libraries_res) {
     int flag = 1;
@@ -345,7 +531,7 @@ int download_java() {
       m_asprintf(&url,
                  "https://api.adoptium.net/v3/binary/latest/%d/ga/linux/x64/jre/hotspot/normal/eclipse",
                  majorVersion_res->valueint);
-    package *java = m_malloc(sizeof(package));
+    Package *java = m_malloc(sizeof(Package));
     java->url = url;
     java->store = m_strdup(".moco/java.tar.gz");
     java->path = m_strdup(".moco/java.tar.gz");
@@ -366,33 +552,45 @@ int download_java() {
   return 0;
 }
 
-void installDependencies() {
-  toml_result_t r = toml_parse_file_ex("instance.toml");
+int installDependencies(void) {
+  int rc = 0;
+  toml_result_t r = {0};
+  FILE *lock_f = NULL;
+  toml_result_t lock = {0};
+
+  r = toml_parse_file_ex("instance.toml");
   if (!r.ok) {
     fprintf(stderr, "Error opening instance.toml: %s\n", r.errmsg);
-    return;
+    rc = 1;
+    goto cleanup;
+  }
+  lock = toml_parse_file_ex("instance-lock.toml");
+  toml_datum_t loader_l = toml_get(lock.toptab, "loader");
+  if (loader_l.type == TOML_STRING) {
+    fprintf(stderr, "%s is already installed.\n", loader_l.u.s);
+    goto cleanup;
   }
   toml_datum_t rt = r.toptab;
   toml_datum_t ver = toml_seek(rt, "game.version");
   if (ver.type != TOML_STRING) {
     fprintf(stderr, "The game version must be enclosed in quotation marks.\n");
-    toml_free(r);
-    return;
+    rc = 1;
+    goto cleanup;
   }
   toml_datum_t loader_type = toml_seek(rt, "dependencies.loader");
   toml_datum_t loader_ver = toml_seek(rt, "dependencies.loader_version");
   if (loader_type.type != TOML_STRING) {
-    toml_free(r);
-    return;
+    rc = 1;
+    goto cleanup;
   }
-  // TODO 本地化forge，neoforge安装
+  lock_f = fopen("instance-lock.toml","rb+");
   if (strcmp(loader_type.u.s, "forge") == 0) {
-    // https://maven.minecraftforge.net/net/minecraftforge/forge/{MC版本}-{Forge版本}/forge-{MC版本}-{Forge版本}-installer.jar
     if (download_java() != 0) {
       fprintf(stderr, "Error downloading Java runtime, cannot continue installing Forge\n");
-      m_exit(EX_IOERR);
+      rc = 1;
+      goto cleanup;
     }
-    package *forge_installer_package = m_malloc(sizeof(package));
+    Package *forge_installer_package = m_malloc(sizeof(Package));
     forge_installer_package->path = m_strdup(".moco/forge-installer.jar");
     forge_installer_package->sha1 = m_strdup("-1");
     forge_installer_package->store = m_strdup(".moco/forge-installer.jar");
@@ -409,16 +607,22 @@ void installDependencies() {
                   "\t\"profiles\":{}\n"
                   "}");
     fclose(file);
-    system(".moco/java/bin/java -jar .moco/forge-installer.jar --installClient .minecraft");
+    int status = system(".moco/java/bin/java -jar .moco/forge-installer.jar --installClient .minecraft");
+    if (WEXITSTATUS(status) != 0) {
+      fprintf(stderr, "Error installing Forge, installer exited with code %d\n", status);
+      rc = 1;
+      goto cleanup;
+    }
+    toml_add_on_toptab(lock_f,"loader","forge");
+    toml_add_on_toptab(lock_f,"loader_version",loader_ver.u.s);
   }
   if (strcmp(loader_type.u.s, "neoforge") == 0) {
-    // if (strstr(version.u.s,"1.20.2")!=NULL || strstr(version.u.s,"1.20.3")!=NULL) {
-    //   fprintf(stderr,"Sorry,the neoforge 1.20.2/1.20.3 is too chaos,not be support\n");
-    //   m_exit(EX_DATAERR);
-    // }
-    // https://maven.neoforged.net/releases/net/neoforged/neoforge/[NeoForge版本号]/neoforge-[NeoForge版本号]-installer.jar
-    download_java();
-    package *neoforge_installer_package = m_malloc(sizeof(package));
+    if (download_java() != 0) {
+      fprintf(stderr, "Error downloading Java runtime, cannot continue installing NeoForge\n");
+      rc = 1;
+      goto cleanup;
+    }
+    Package *neoforge_installer_package = m_malloc(sizeof(Package));
     neoforge_installer_package->path = m_strdup(".moco/neoforge-installer.jar");
     neoforge_installer_package->sha1 = m_strdup("-1");
     neoforge_installer_package->store = m_strdup(".moco/neoforge-installer.jar");
@@ -433,11 +637,17 @@ void installDependencies() {
                   "\t\"profiles\":{}\n"
                   "}");
     fclose(file);
-    system(".moco/java/bin/java -jar .moco/neoforge-installer.jar --installClient .minecraft");
+    int status = system(".moco/java/bin/java -jar .moco/neoforge-installer.jar --installClient .minecraft");
+    if (WEXITSTATUS(status) != 0) {
+      fprintf(stderr, "Error installing NeoForge, installer exited with code %d\n", status);
+      rc = 1;
+      goto cleanup;
+    }
+    toml_add_on_toptab(lock_f, "loader", "neoforge");
+    toml_add_on_toptab(lock_f, "loader_version", loader_ver.u.s);
   }
   if (strcmp(loader_type.u.s, "fabric-loader") == 0) {
-    //  https://meta.fabricmc.net/v2/versions/loader/:game_version/:loader_version
-    package *fabric_loader_package = m_malloc(sizeof(package));
+    Package *fabric_loader_package = m_malloc(sizeof(Package));
     char *url;
     m_asprintf(&url, "https://meta.fabricmc.net/v2/versions/loader/%s/%s/profile/json", ver.u.s, loader_ver.u.s);
     char *path;
@@ -455,11 +665,12 @@ void installDependencies() {
     if (strcmp(ver.u.s, inheritsFrom) != 0) {
       fprintf(stderr, "Error: Fabric Loader version %s does not match game version %s\n", loader_ver.u.s, ver.u.s);
       cJSON_Delete(json);
-      m_exit(EX_DATAERR);
+      rc = 1;
+      goto cleanup;
     }
     cJSON *libraries = cJSON_GetObjectItemCaseSensitive(json, "libraries");
     cJSON *item;
-    package *libraries_package = m_malloc(sizeof(package));
+    Package *libraries_package = m_malloc(sizeof(Package));
     cJSON_ArrayForEach(item, libraries) {
       char *name = reMaven(cJSON_GetObjectItemCaseSensitive(item, "name")->valuestring);
       char *path_l;
@@ -487,11 +698,18 @@ void installDependencies() {
     }
     free(libraries_package);
     cJSON_Delete(json);
+    toml_add_on_toptab(lock_f, "loader", "fabric-loader");
+    toml_add_on_toptab(lock_f, "loader_version", loader_ver.u.s);
   }
   if (strcmp(loader_type.u.s, "quilt-loader") == 0) {
-    printf("此加载器方式暂时被搁置");
+    printf("此加载器方式暂时被搁置\n");
   }
+
+cleanup:
+  toml_free(lock);
+  if (lock_f) fclose(lock_f);
   toml_free(r);
+  return rc;
 }
 
 void installMods() {
@@ -504,7 +722,7 @@ void installMods() {
     toml_free(r);
     return;
   }
-  package *mod_package = m_malloc(sizeof(package));
+  Package *mod_package = m_malloc(sizeof(Package));
   for (int i = 0; i < mods.u.arr.size; i++) {
     toml_datum_t mod = mods.u.arr.elem[i];
     mod_package->path = m_strdup(toml_get(mod, "path").u.s);

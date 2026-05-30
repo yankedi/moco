@@ -4,8 +4,11 @@
 
 #include "import.h"
 #include "cJSON.h"
+#include "command/install/install.h"
+#include "command/search/search.h"
 #include "interface.h"
 #include "m_exit.h"
+#include "utility/file/toml.h"
 #include "utility/file/zip.h"
 #include "utility/mtool.h"
 #include "utility/store/store.h"
@@ -17,6 +20,9 @@
 #include <string.h>
 #include <sysexits.h>
 #include <unistd.h>
+
+static int subcommand_handler(const char *subcommand);
+static int local_handler(const char *subcommand);
 
 void import(int argc, char *argv[]) {
   int opt;
@@ -148,4 +154,119 @@ void import(int argc, char *argv[]) {
   }else {
     fprintf(stderr,"File %s does not exist\n", subcommands);
   }
+}
+
+void import_n(int argc,char *argv[]) {
+  int opt;
+  int option_index = 0;
+  optind = 1;
+  while ((opt = getopt_long(argc,argv,"+h",import_options,&option_index)) != -1) {
+    switch (opt) {
+    case 'h':
+      printf("Usage: moco import archive.zip/archive.mrpack/... [options]\n");
+      printf("Options:\n");
+      printf("  -h, --help    Show this help message\n");
+      break;
+    default:
+      fprintf(stderr, "Unknown option `%c'\n", opt);
+    }
+  }
+  subcommand_handler(argv[optind]);
+}
+
+int subcommand_handler(const char *subcommand) {
+  int rc = 0;
+  char *str = NULL;
+  char *prefix = NULL;
+  char *suffix = NULL;
+  SearchResult *result = NULL;
+  FILE *instance_f = NULL;
+  FILE *lock_f = NULL;
+  toml_result_t instance = {0};
+  toml_result_t lock = {0};
+
+  if (subcommand == NULL) goto clearup;
+  str = m_strdup(subcommand);
+  prefix = strtok(str,":");
+  suffix = strtok(NULL,":");
+  if (prefix == NULL) {
+    rc = local_handler(subcommand);
+    goto clearup;
+  }
+  if (access("instance.toml", F_OK) != 0) fclose(fopen("instance.toml", "w"));
+  instance_f = fopen("instance.toml","rb+");
+  if (access("instance-lock.toml", F_OK) != 0) fclose(fopen("instance-lock.toml", "w"));
+  lock_f = fopen("instance-lock.toml","rb+");
+  instance = toml_parse_file_ex("instance.toml");
+  toml_datum_t instance_r = instance.toptab;
+  toml_datum_t version = toml_seek(instance_r, "game.version");
+  printf("prefix: %s, suffix: %s\n", prefix, suffix);
+  lock = toml_parse_file_ex("instance-lock.toml");
+  toml_datum_t lock_r = lock.toptab;
+  if (strcmp(prefix,"version") == 0) {
+    if (version.type == TOML_STRING) {
+      printf("Your game version has been declared in instance.toml:%s\n", version.u.s);
+      goto clearup;
+    }
+    result = search_version(suffix);
+    if (result == NULL) {
+      fprintf(stderr, "No matching Minecraft version found for %s\n", suffix);
+      goto clearup;
+    }
+    char *v1;
+    m_asprintf(&v1,"version = \"%s\"",cJSON_GetObjectItemCaseSensitive(result->node[0],"id")->valuestring);
+    toml_add_on_table(instance_f,"[game]",v1);
+    free(v1);
+    fflush(instance_f);
+    installVersion_n();
+  }else if (strcmp(prefix,"loader") == 0) {
+    if (suffix == NULL) {
+      printf("Suffix is NULL\n");
+      goto clearup;
+    }
+    if (strcmp(suffix,"forge") == 0) {
+      result = search_forge(version.u.s,V);
+    }else if (strcmp(suffix,"neoforge") == 0) {
+      result = search_neoforge(version.u.s,V);
+    }else if (strcmp(suffix,"fabric") == 0) {
+      result = search_fabric(NULL);
+    }else {
+      fprintf(stderr, "Unknown or unsupported loader: %s\n", suffix);
+      goto clearup;
+    }
+    if (result == NULL) {
+      fprintf(stderr, "No matching loader version found for Minecraft %s\n", version.u.s);
+      goto clearup;
+    }
+    char *v1,*v2;
+    m_asprintf(&v1,"loader = \"%s\"",cJSON_GetObjectItemCaseSensitive(result->node[0],"loader")->valuestring);
+    m_asprintf(&v2,"loader_version = \"%s\"",cJSON_GetObjectItemCaseSensitive(result->node[0],"loader_version")->valuestring);
+    toml_add_on_table(instance_f,"[dependencies]",v1);
+    toml_add_on_table(instance_f,"[dependencies]",v2);
+    free(v1);
+    free(v2);
+    fflush(instance_f);
+    installDependencies();
+  }else if (strcmp(prefix,"mod") == 0) {
+    result = search_mod(suffix);
+  }else if (strcmp(prefix,"modpack") == 0) {
+    result = search_modpack(suffix);
+  }else if (strcmp(prefix,"shader") == 0) {
+    result = search_shader(suffix);
+  }else {
+    printf("Unknown prefix: %s\n", prefix);
+    goto clearup;
+  }
+  clearup:
+  if (lock_f) fclose(lock_f);
+  toml_free(lock);
+  if (instance_f) fclose(instance_f);
+  toml_free(instance);
+  free_SearchResult(result);
+  free(str);
+  return rc;
+}
+
+int local_handler(const char *subcommand) {
+
 }

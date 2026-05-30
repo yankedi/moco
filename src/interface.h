@@ -21,10 +21,10 @@ typedef struct {
   char *sha1;
   char *path;
   char *store;
-} package;
+} Package;
 
 typedef struct {
-  package *pack;
+  Package *pack;
   int front;
   int back;
 } OnePackages;
@@ -39,6 +39,6 @@ typedef struct {
   unsigned short count;
 } SearchResult;
 
-extern void free_package(package *p);
+extern void free_package(Package *p);
 extern void free_SearchResult(SearchResult *result);
 #endif // MOCO_OPT_H

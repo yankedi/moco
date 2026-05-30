@@ -4,20 +4,24 @@
 
 #include "toml.h"
 
+#include "utility/mtool.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <stdio.h>
 
+//TODO 指定合理的函数名
 /**
  *
  * @param file toml format file
- * @param name the table name,request"["and"]"
+ * @param tableName the table name,request"["and"]"
  * @param value want to add value eg."game = \"26.1.1\""
  */
-void toml_add_table(FILE *file, const char *name, const char *value) {
+void toml_add_on_table(FILE *file, const char *tableName, const char *value) {
   if (file == NULL) return;
+  rewind(file);
   char buffer[1024];
   char f = 0;
   long target = -1;
@@ -31,7 +35,7 @@ void toml_add_table(FILE *file, const char *name, const char *value) {
     char *line_start = buffer;
     while (*line_start == ' ' || *line_start == '\t') line_start++;
     if (f == 0) {
-      if (strncmp(line_start, name, strlen(name)) == 0) {
+      if (strncmp(line_start, tableName, strlen(tableName)) == 0) {
         f = 1;
       }
     } else if (f == 1 && line_start[0] == '[') {
@@ -41,7 +45,7 @@ void toml_add_table(FILE *file, const char *name, const char *value) {
   }
   if (f == 0) {
     fseek(file, 0, SEEK_END);
-    fputs(name, file);
+    fputs(tableName, file);
     fputs("\n", file);
     fputs(value, file);
     if (value[strlen(value) - 1] != '\n')
@@ -71,4 +75,59 @@ void toml_add_table(FILE *file, const char *name, const char *value) {
     fputs(bsize, file);
     free(bsize);
   }
+}
+
+void toml_delete_form_key(FILE *file,const char *key) {
+  if (file == NULL) return;
+  if (key == NULL) return;
+
+  long pre_site = ftell(file);
+  rewind(file);
+
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t read;
+
+  long target = -1;
+  while ((read = getline(&line, &len, file)) != -1) {
+    size_t klen = strlen(key);
+    if (strncmp(line, key, klen) == 0 && line[klen] == ' ') {
+      target = ftell(file);
+      break;
+    }
+  }
+  if (target == -1) {
+    free(line);
+    fseek(file,pre_site,SEEK_SET);
+    return;
+  }
+  fseek(file,0,SEEK_END);
+  size_t size = ftell(file) - target;
+  char *buffer = m_malloc(size + 1);
+  fseek(file,target,SEEK_SET);
+  fread(buffer,1,size,file);
+  fseek(file,target-strlen(line),SEEK_SET);
+  fwrite(buffer,1,size,file);
+  ftruncate(fileno(file), target - strlen(line) + size);
+  free(buffer);
+  free(line);
+  fseek(file,pre_site,SEEK_SET);
+}
+
+void toml_add_on_toptab(FILE *file,const char *key,const char *value) {
+  if (file == NULL) return;
+  long pre_site = ftell(file);
+  fseek(file, 0, SEEK_END);
+  long size = ftell(file);
+  char *buffer = m_malloc(size + 1);
+  rewind(file);
+  fread(buffer,1,size,file);
+  rewind(file);
+  char *tmp;
+  m_asprintf(&tmp,"%s = \"%s\"\n",key,value);
+  fprintf(file,"%s",tmp);
+  free(tmp);
+  fwrite(buffer,1,size,file);
+  free(buffer);
+  fseek(file, pre_site, SEEK_SET);
 }

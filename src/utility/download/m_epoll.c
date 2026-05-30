@@ -21,6 +21,7 @@
 
 #include "m_epoll.h"
 #include "m_exit.h"
+#include "utility/file/toml.h"
 #include "utility/mtool.h"
 #include "utility/store/store.h"
 
@@ -68,7 +69,7 @@ typedef struct {
   FILE *fp;
   char *tmp_path;
   EpollInfo *ep;
-  package *p;
+  Package *p;
 } ConnInfo;
 
 static pthread_mutex_t g_pending_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -269,7 +270,7 @@ static int timer_cb(CURLM *multi, long timeout_ms, void *userp) {
   return 0;
 }
 
-void add_download(EpollInfo *ep, package *p) {
+void add_download(EpollInfo *ep, Package *p) {
   ConnInfo *conn = calloc(1, sizeof(ConnInfo));
   if (!conn) {
     fprintf(stderr, "[下载任务] 分配 ConnInfo 失败\n");
@@ -390,7 +391,7 @@ static void check_multi_info(EpollInfo *ep) {
                 conn->tmp_path ? conn->tmp_path : "(null)",
                 curl_easy_strerror(res), http_code);
         printf("retrying\n");
-        package *p_copy = malloc(sizeof(package));
+        Package *p_copy = malloc(sizeof(Package));
         if (p_copy) {
           p_copy->path = m_strdup(conn->p->path);
           p_copy->url = m_strdup(conn->p->url);
@@ -415,7 +416,7 @@ static void check_multi_info(EpollInfo *ep) {
   }
 }
 
-void submit_download_task(package *p) {
+void submit_download_task(Package *p) {
   if (g_task_pipe_write_fd == -1)
     return;
   if (access(p->store, F_OK) == 0) { // cache hit
@@ -427,14 +428,14 @@ void submit_download_task(package *p) {
     return;
   }
 
-  package *p_copy = calloc(1, sizeof(package));
+  Package *p_copy = calloc(1, sizeof(Package));
   p_copy->url = m_strdup(p->url);
   p_copy->sha1 = m_strdup(p->sha1);
   p_copy->path = m_strdup(p->path);
   p_copy->store = m_strdup(p->store);
 
-  if (write(g_task_pipe_write_fd, &p_copy, sizeof(package *)) !=
-      sizeof(package *)) {
+  if (write(g_task_pipe_write_fd, &p_copy, sizeof(Package *)) !=
+      sizeof(Package *)) {
     fprintf(stderr, "写入管道失败\n");
     free_package(p_copy);
   } else {
@@ -504,9 +505,9 @@ void *epoll_download(void *arg) {
         // long)count,
         //        ep.running_handles);
       } else if (events[i].data.fd == pipe_read_fd) {
-        package *new_task;
+        Package *new_task;
         while (1) {
-          ssize_t n = read(pipe_read_fd, &new_task, sizeof(package *));
+          ssize_t n = read(pipe_read_fd, &new_task, sizeof(Package *));
           if (n == 0) {
             break;
           }
@@ -516,7 +517,7 @@ void *epoll_download(void *arg) {
             }
             break;
           }
-          if (n != sizeof(package *)) {
+          if (n != sizeof(Package *)) {
             break;
           }
           add_download(&ep, new_task);

@@ -38,7 +38,7 @@ void update(void) {
       "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
   printf("Download Minecraft version_manifest_v2.json ing....\n");
   remove(manifest_path);
-  package *manifest = m_malloc(sizeof(package));
+  Package *manifest = m_malloc(sizeof(Package));
   manifest->url = url;
   manifest->path = manifest_path;
   manifest->sha1 = m_strdup("-1");
@@ -51,7 +51,7 @@ void update(void) {
   m_asprintf(&fabric_manifest_path, "%s/fabric_manifest.json", XDG_DATA_HOME);
   remove(fabric_manifest_path);
   printf("Download Fabric Loader version manifest ing....\n");
-  package *fabric_manifest = m_malloc(sizeof(package));
+  Package *fabric_manifest = m_malloc(sizeof(Package));
   fabric_manifest->url = m_strdup("https://meta.fabricmc.net/v2/versions");
   fabric_manifest->path = fabric_manifest_path;
   fabric_manifest->sha1 = m_strdup("-1");
@@ -64,7 +64,7 @@ void update(void) {
   m_asprintf(&forge_manifest_path, "%s/forge_manifest.json", XDG_DATA_HOME);
   remove(forge_manifest_path);
   printf("Download Forge version manifest ing....\n");
-  package *forge_manifest = m_malloc(sizeof(package));
+  Package *forge_manifest = m_malloc(sizeof(Package));
   forge_manifest->url = m_strdup("https://api.yanmain.top/transform/xml/json?url=https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml");
   //transform xml to json serve from yankedi
   forge_manifest->path = forge_manifest_path;
@@ -78,7 +78,7 @@ void update(void) {
   m_asprintf(&neoforge_manifest_path, "%s/neoforge_manifest.json",XDG_DATA_HOME);
   remove(neoforge_manifest_path);
   printf("Download NeoForge version manifest ing....\n");
-  package *neoforge_manifest = m_malloc(sizeof(package));
+  Package *neoforge_manifest = m_malloc(sizeof(Package));
   neoforge_manifest->url = m_strdup("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge");
   neoforge_manifest->path = neoforge_manifest_path;
   neoforge_manifest->sha1 = m_strdup("-1");
@@ -137,7 +137,7 @@ total_time_sec; res = curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME,
   char *url = NULL;
   m_asprintf(&url,"%s/mc/game/version_manifest_v2.json",SOURCES[current_source].version_manifest);
   printf("Epoll:Download version_manifest_v2.json ing....\n");
-  package *manifest = m_malloc(sizeof(package));
+  Package *manifest = m_malloc(sizeof(Package));
   manifest->url = url;
   manifest->path = manifest_path;
   manifest->sha1 = m_strdup("manifast");

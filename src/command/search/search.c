@@ -65,6 +65,29 @@ void search(int argc, char *argv[]) {
   }
 }
 
+SearchResult *search_mod(const char *slug) {
+
+}
+
+SearchResult *search_mods(const char *slug) {
+
+}
+
+SearchResult *search_modpack(const char *slug) {
+
+}
+
+SearchResult *search_modpacks(const char *slug) {
+
+}
+
+SearchResult *search_shader(const char *slug) {
+
+}
+SearchResult *search_shaders(const char *slug) {
+
+}
+
 //TODO 超长文本分页显示
 
 SearchResult *search_fabric(const char *id) {
@@ -428,7 +451,7 @@ SearchResult *search_versions(const char *v) {
   cJSON_Delete(manifest);
   return NULL;
 }
-
+//TODO 考虑和has_verison合并
 SearchResult *search_version(const char *v) {
   if (v == NULL) return NULL;
   char *path = NULL;
@@ -468,8 +491,8 @@ SearchResult *search_version(const char *v) {
 }
 
 #if 0
-package *get_version(const char *v) {
-  package *p = m_malloc(sizeof(package));
+Package *get_version(const char *v) {
+  Package *p = m_malloc(sizeof(Package));
   p->url = NULL;
   p->sha1 = NULL;
   p->path = NULL;

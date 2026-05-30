@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
       start();
     }
     if (strcmp(subcommand,"import") == 0) {
-      import(argc - optind, argv + optind);
+      import_n(argc - optind, argv + optind);
     }
   }
   m_exit(EXIT_SUCCESS);

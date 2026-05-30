@@ -5,6 +5,6 @@
 #ifndef MOCO_DOWNLOAD_H
 #define MOCO_DOWNLOAD_H
 #include "interface.h"
-extern int DownloadOne(package *p);
-extern int DownloadAll(package *list, const int total);
+extern int DownloadOne(Package *p);
+extern int DownloadAll(Package *list, const int total);
 #endif // MOCO_DOWNLOAD_H

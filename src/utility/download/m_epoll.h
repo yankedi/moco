@@ -21,6 +21,6 @@ extern void init_epoll_download_task();
 extern void wait_epoll_download_task();
 extern void wait_download_task(const char *store);
 extern void stop_epoll_download_task();
-extern void submit_download_task(package *p);
+extern void submit_download_task(Package *p);
 
 #endif // MOCO_M_EPOLL_H

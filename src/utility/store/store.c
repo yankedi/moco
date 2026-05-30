@@ -30,7 +30,7 @@ char *get_tmp(const char *store) {
   return path;
 }
 /*
-char *getPath(package *p) {
+char *getPath(Package *p) {
   char *path;
   char *str;
   FILE *fp =NULL;

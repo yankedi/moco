@@ -17,7 +17,7 @@
 
 void *worker(void *arg);
 
-int DownloadOne(package *p) {
+int DownloadOne(Package *p) {
   char *path = get_store_path(p->sha1);
   int flag = 0;
   if (access(path, F_OK) == 0) {
@@ -73,7 +73,7 @@ int DownloadOne(package *p) {
   return -1;
 }
 
-int DownloadAll(package *list, const int total) {
+int DownloadAll(Package *list, const int total) {
   long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
   if (num_cores == -1)
     num_cores = 5;

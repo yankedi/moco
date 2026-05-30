@@ -29,7 +29,7 @@ struct option search_modrinth_options[] = {{"help", no_argument, NULL, 'h'},
                                            {"author", required_argument, NULL, 'a'},
                                            {0, 0, 0, 0}};
 
-void free_package(package *p) {
+void free_package(Package *p) {
   if (p) {
     if (p->path)
       free(p->path);
