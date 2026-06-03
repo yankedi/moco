@@ -353,7 +353,7 @@ static void tui_render_list(struct ncplane *left, cJSON *hits, int total,
 
   for (int i = *sco; i < *sco + vis_rows && i < total; i++) {
     cJSON *mod = cJSON_GetArrayItem(hits, i);
-    cJSON *nm = cJSON_GetObjectItemCaseSensitive(mod, "name");
+    cJSON *sl = cJSON_GetObjectItemCaseSensitive(mod, "slug");
     cJSON *au = cJSON_GetObjectItemCaseSensitive(mod, "author");
     int y = (i - *sco) * row_h;
     int is_sel = (i == *sel);
@@ -371,13 +371,13 @@ static void tui_render_list(struct ncplane *left, cJSON *hits, int total,
     int plen = (int)strlen(ptype);
     int name_max = lw - plen - 8;
     if (name_max < 4) name_max = 4;
-    int name_len = (int)strlen(nm->valuestring);
+    int name_len = (int)strlen(sl->valuestring);
     if (name_len > name_max)
       ncplane_printf_yx(left, y, 0, " %c %-3d %.*s...",
-        is_sel ? '>' : ' ', i + 1, name_max - 3, nm->valuestring);
+        is_sel ? '>' : ' ', i + 1, name_max - 3, sl->valuestring);
     else
       ncplane_printf_yx(left, y, 0, " %c %-3d %s",
-        is_sel ? '>' : ' ', i + 1, nm->valuestring);
+        is_sel ? '>' : ' ', i + 1, sl->valuestring);
     if (plen) ncplane_printf_yx(left, y, lw - plen - 1, "%s", ptype);
     ncplane_set_fg_rgb8(left, TUI_LIST_AUTHOR_FG);
     ncplane_off_styles(left, NCSTYLE_BOLD);
@@ -607,4 +607,442 @@ void cleanup(void) {
   free(loaders);
   free(sort);
   free(author);
+}
+
+/**
+ * Search a single mod by exact slug on Modrinth.
+ *
+ * API: GET /v2/project/{slug}/version
+ * Filters: game_versions (optional), loaders (optional)
+ *
+ * @param slug    exact mod slug (e.g. "sodium")
+ * @param version Minecraft version to filter by, or NULL for all
+ * @param loader  mod loader to filter by (e.g. "fabric"), or NULL for all
+ * @return SearchResult with nodes:
+ *   { slug, version, url, sha1, dependencies[{project_id, dependency_type, slug}],
+ *     game_versions[], loaders[] }
+ *   Empty array + NULL on failure.
+ */
+SearchResult *modrinth_search_mod(const char *slug, const char *version, const char *loader) {
+  int rc = 0;
+  char *response = NULL;
+  char *url = NULL;
+  cJSON *json = NULL;
+  SearchResult *result = NULL;
+
+  if (slug == NULL || *slug == '\0') { rc = 1; goto cleanup; }
+
+  char *q = NULL, *sep = "";
+  if (version && version[0]) {
+    char *tmp;
+    m_asprintf(&tmp, "[\"%s\"]",version);
+    char *enc = curl_encode(tmp);
+    free(tmp);
+    m_asprintf(&q, "%sgame_versions=%s", sep, enc);
+    free(enc);
+    sep = "&";
+  }
+  if (loader && loader[0]) {
+    char *tmp;
+    m_asprintf(&tmp, "[\"%s\"]", loader);
+    char *enc = curl_encode(tmp);
+    free(tmp);
+    m_asprintf(&q, "%s%sloaders=%s", q ? q : "", sep, enc);
+    free(enc);
+  }
+  m_asprintf(&url, "https://api.modrinth.com/v2/project/%s/version%s%s", slug, q ? "?" : "", q ? q : "");
+  free(q);
+
+  if (curl_get(url, &response) != 0) { rc = 1; goto cleanup; }
+
+  json = cJSON_Parse(response);
+  if (!json || !cJSON_IsArray(json)) { rc = 1; goto cleanup; }
+
+  result = m_malloc(sizeof(SearchResult));
+  result->node = NULL;
+  result->count = 0;
+
+  cJSON *ver;
+  cJSON_ArrayForEach(ver, json) {
+    cJSON *vn = cJSON_GetObjectItemCaseSensitive(ver, "version_number");
+    if (!vn || !cJSON_IsString(vn)) continue;
+
+    int has_filter = (version && version[0]) || (loader && loader[0]);
+    cJSON *files = cJSON_GetObjectItemCaseSensitive(ver, "files");
+    cJSON *ff = cJSON_IsArray(files) ? cJSON_GetArrayItem(files, 0) : NULL;
+    cJSON *file_url = ff ? cJSON_GetObjectItemCaseSensitive(ff, "url") : NULL;
+    cJSON *hashes = ff ? cJSON_GetObjectItemCaseSensitive(ff, "hashes") : NULL;
+
+    cJSON *node = cJSON_CreateObject();
+    cJSON_AddStringToObject(node, "slug", slug);
+    cJSON_AddStringToObject(node, "version", vn->valuestring);
+    if (file_url) cJSON_AddStringToObject(node, "url", file_url->valuestring);
+    if (hashes) {
+      cJSON *s = cJSON_GetObjectItemCaseSensitive(hashes, "sha1");
+      if (s) cJSON_AddStringToObject(node, "sha1", s->valuestring);
+    }
+
+    cJSON *deps = cJSON_GetObjectItemCaseSensitive(ver, "dependencies");
+    if (cJSON_IsArray(deps) && cJSON_GetArraySize(deps) > 0) {
+      char *ids_raw = NULL;
+      cJSON *dep;
+      cJSON_ArrayForEach(dep, deps) {
+        cJSON *pid = cJSON_GetObjectItemCaseSensitive(dep, "project_id");
+        if (!cJSON_IsString(pid)) continue;
+        char *old = ids_raw;
+        if (ids_raw) m_asprintf(&ids_raw, "%s,\"%s\"", old, pid->valuestring);
+        else m_asprintf(&ids_raw, "\"%s\"", pid->valuestring);
+        free(old);
+      }
+      cJSON *slug_map = NULL;
+      if (ids_raw) {
+        char *tmp,*burl = NULL, *bresp = NULL;;
+        m_asprintf(&tmp, "[%s]", ids_raw);
+        char *enc = curl_encode(tmp);
+        free(tmp);
+        m_asprintf(&burl, "https://api.modrinth.com/v2/projects?ids=%s", enc);
+        free(enc); free(ids_raw);
+        if (curl_get(burl, &bresp) == 0) {
+          slug_map = cJSON_Parse(bresp);
+          free(bresp);
+        }
+        free(burl);
+      }
+      cJSON *edeps = cJSON_CreateArray();
+      cJSON_ArrayForEach(dep, deps) {
+        cJSON *edep = cJSON_Duplicate(dep, 1);
+        cJSON *pid = cJSON_GetObjectItemCaseSensitive(dep, "project_id");
+        if (cJSON_IsString(pid) && cJSON_IsArray(slug_map)) {
+          cJSON *proj;
+          cJSON_ArrayForEach(proj, slug_map) {
+            cJSON *mid = cJSON_GetObjectItemCaseSensitive(proj, "id");
+            if (cJSON_IsString(mid) && strcmp(mid->valuestring, pid->valuestring) == 0) {
+              cJSON *mslug = cJSON_GetObjectItemCaseSensitive(proj, "slug");
+              if (cJSON_IsString(mslug)) cJSON_AddStringToObject(edep, "slug", mslug->valuestring);
+              break;
+            }
+          }
+        }
+        cJSON_AddItemToArray(edeps, edep);
+      }
+      cJSON_Delete(slug_map);
+      cJSON_AddItemToObject(node, "dependencies", edeps);
+    }
+
+    cJSON *gv = cJSON_GetObjectItemCaseSensitive(ver, "game_versions");
+    if (cJSON_IsArray(gv)) {
+      int gv_sz = cJSON_GetArraySize(gv);
+      cJSON *rgv = cJSON_CreateArray();
+      for (int gi = gv_sz - 1; gi >= 0; gi--)
+        cJSON_AddItemToArray(rgv, cJSON_Duplicate(cJSON_GetArrayItem(gv, gi), 1));
+      cJSON_AddItemToObject(node, "game_versions", rgv);
+    }
+
+    cJSON *lds = cJSON_GetObjectItemCaseSensitive(ver, "loaders");
+    if (lds) cJSON_AddItemToObject(node, "loaders", cJSON_Duplicate(lds, 1));
+
+    result->node = realloc(result->node, (result->count + 1) * sizeof(cJSON *));
+    result->node[result->count++] = node;
+    if (has_filter) break;
+  }
+
+  if (result->count == 0) { rc = 1; goto cleanup; }
+
+cleanup:
+  free(response);
+  free(url);
+  cJSON_Delete(json);
+  if (rc != 0) { free_SearchResult(result); result = NULL; }
+  return result;
+}
+
+/**
+ * Search a single modpack by exact slug on Modrinth.
+ *
+ * API: GET /v2/project/{slug}/version
+ * Filters: game_versions (optional), loaders (optional)
+ *
+ * Dependencies are NOT resolved — modpacks embed hundreds of mods
+ * inside the .mrpack itself, which parser_modrinth_modpack handles.
+ *
+ * @param slug    exact modpack slug (e.g. "fabulously-optimized")
+ * @param version Minecraft version to filter by, or NULL for all
+ * @param loader  mod loader to filter by, or NULL for all
+ * @return SearchResult with nodes:
+ *   { slug, version, url, sha1, game_versions[], loaders[] }
+ *   Empty array + NULL on failure.
+ */
+SearchResult *modrinth_search_modpack(const char *slug, const char *version, const char *loader) {
+  int rc = 0;
+  char *response = NULL;
+  char *url = NULL;
+  cJSON *json = NULL;
+  SearchResult *result = NULL;
+
+  if (slug == NULL || *slug == '\0') { rc = 1; goto cleanup; }
+
+  char *q = NULL, *sep = "";
+  if (version && version[0]) {
+    char *tmp;
+    m_asprintf(&tmp, "[\"%s\"]", version);
+    char *enc = curl_encode(tmp);
+    free(tmp);
+    m_asprintf(&q, "%sgame_versions=%s", sep, enc);
+    free(enc); sep = "&";
+  }
+  if (loader && loader[0]) {
+    char *tmp;
+    m_asprintf(&tmp, "[\"%s\"]", loader);
+    char *enc = curl_encode(tmp);
+    free(tmp);
+    m_asprintf(&q, "%s%sloaders=%s", q ? q : "", sep, enc);
+    free(enc);
+  }
+  m_asprintf(&url, "https://api.modrinth.com/v2/project/%s/version%s%s", slug, q ? "?" : "", q ? q : "");
+  free(q);
+
+  if (curl_get(url, &response) != 0) { rc = 1; goto cleanup; }
+
+  json = cJSON_Parse(response);
+  if (!json || !cJSON_IsArray(json)) { rc = 1; goto cleanup; }
+
+  result = m_malloc(sizeof(SearchResult));
+  result->node = NULL;
+  result->count = 0;
+
+  cJSON *ver;
+  cJSON_ArrayForEach(ver, json) {
+    cJSON *vn = cJSON_GetObjectItemCaseSensitive(ver, "version_number");
+    if (!vn || !cJSON_IsString(vn)) continue;
+
+    cJSON *files = cJSON_GetObjectItemCaseSensitive(ver, "files");
+    cJSON *ff = cJSON_IsArray(files) ? cJSON_GetArrayItem(files, 0) : NULL;
+    cJSON *file_url = ff ? cJSON_GetObjectItemCaseSensitive(ff, "url") : NULL;
+    cJSON *hashes = ff ? cJSON_GetObjectItemCaseSensitive(ff, "hashes") : NULL;
+
+    cJSON *node = cJSON_CreateObject();
+    cJSON_AddStringToObject(node, "slug", slug);
+    cJSON_AddStringToObject(node, "version", vn->valuestring);
+    if (file_url) cJSON_AddStringToObject(node, "url", file_url->valuestring);
+    if (hashes) {
+      cJSON *s = cJSON_GetObjectItemCaseSensitive(hashes, "sha1");
+      if (s) cJSON_AddStringToObject(node, "sha1", s->valuestring);
+    }
+    cJSON *gv = cJSON_GetObjectItemCaseSensitive(ver, "game_versions");
+    if (cJSON_IsArray(gv)) {
+      int gv_sz = cJSON_GetArraySize(gv);
+      cJSON *rgv = cJSON_CreateArray();
+      for (int gi = gv_sz - 1; gi >= 0; gi--)
+        cJSON_AddItemToArray(rgv, cJSON_Duplicate(cJSON_GetArrayItem(gv, gi), 1));
+      cJSON_AddItemToObject(node, "game_versions", rgv);
+    }
+    cJSON *lds = cJSON_GetObjectItemCaseSensitive(ver, "loaders");
+    if (lds) cJSON_AddItemToObject(node, "loaders", cJSON_Duplicate(lds, 1));
+
+    int has_filter = (version && version[0]) || (loader && loader[0]);
+    result->node = realloc(result->node, (result->count + 1) * sizeof(cJSON *));
+    result->node[result->count++] = node;
+    if (has_filter) break;
+  }
+
+  if (result->count == 0) { rc = 1; goto cleanup; }
+
+cleanup:
+  free(response);
+  free(url);
+  cJSON_Delete(json);
+  if (rc != 0) { free_SearchResult(result); result = NULL; }
+  return result;
+}
+
+/**
+ * Search a single shader by exact slug on Modrinth.
+ *
+ * API: GET /v2/project/{slug}/version
+ * Filters: game_versions (optional), loaders (optional)
+ *
+ * Dependencies are NOT resolved — shaders typically have none.
+ * Shader loaders differ from mods: "iris", "optifine" instead of
+ * "fabric"/"forge"/"neoforge".
+ *
+ * @param slug    exact shader slug (e.g. "bsl-shaders")
+ * @param version Minecraft version to filter by, or NULL for all
+ * @param loader  shader loader to filter by, or NULL for all
+ * @return SearchResult with nodes:
+ *   { slug, version, url, sha1, game_versions[], loaders[] }
+ *   Empty array + NULL on failure.
+ */
+SearchResult *modrinth_search_shader(const char *slug, const char *version, const char *loader) {
+  int rc = 0;
+  char *response = NULL;
+  char *url = NULL;
+  cJSON *json = NULL;
+  SearchResult *result = NULL;
+
+  if (slug == NULL || *slug == '\0') { rc = 1; goto cleanup; }
+
+  char *q = NULL, *sep = "";
+  if (version && version[0]) {
+    char *tmp;
+    m_asprintf(&tmp, "[\"%s\"]", version);
+    char *enc = curl_encode(tmp);
+    free(tmp);
+    m_asprintf(&q, "%sgame_versions=%s", sep, enc);
+    free(enc); sep = "&";
+  }
+  if (loader && loader[0]) {
+    char *tmp;
+    m_asprintf(&tmp, "[\"%s\"]", loader);
+    char *enc = curl_encode(tmp);
+    free(tmp);
+    m_asprintf(&q, "%s%sloaders=%s", q ? q : "", sep, enc);
+    free(enc);
+  }
+  m_asprintf(&url, "https://api.modrinth.com/v2/project/%s/version%s%s", slug, q ? "?" : "", q ? q : "");
+  free(q);
+
+  if (curl_get(url, &response) != 0) { rc = 1; goto cleanup; }
+
+  json = cJSON_Parse(response);
+  if (!json || !cJSON_IsArray(json)) { rc = 1; goto cleanup; }
+
+  result = m_malloc(sizeof(SearchResult));
+  result->node = NULL;
+  result->count = 0;
+
+  cJSON *ver;
+  cJSON_ArrayForEach(ver, json) {
+    cJSON *vn = cJSON_GetObjectItemCaseSensitive(ver, "version_number");
+    if (!vn || !cJSON_IsString(vn)) continue;
+
+    cJSON *files = cJSON_GetObjectItemCaseSensitive(ver, "files");
+    cJSON *ff = cJSON_IsArray(files) ? cJSON_GetArrayItem(files, 0) : NULL;
+    cJSON *file_url = ff ? cJSON_GetObjectItemCaseSensitive(ff, "url") : NULL;
+    cJSON *hashes = ff ? cJSON_GetObjectItemCaseSensitive(ff, "hashes") : NULL;
+
+    cJSON *node = cJSON_CreateObject();
+    cJSON_AddStringToObject(node, "slug", slug);
+    cJSON_AddStringToObject(node, "version", vn->valuestring);
+    if (file_url) cJSON_AddStringToObject(node, "url", file_url->valuestring);
+    if (hashes) {
+      cJSON *s = cJSON_GetObjectItemCaseSensitive(hashes, "sha1");
+      if (s) cJSON_AddStringToObject(node, "sha1", s->valuestring);
+    }
+    cJSON *gv = cJSON_GetObjectItemCaseSensitive(ver, "game_versions");
+    if (cJSON_IsArray(gv)) {
+      int gv_sz = cJSON_GetArraySize(gv);
+      cJSON *rgv = cJSON_CreateArray();
+      for (int gi = gv_sz - 1; gi >= 0; gi--)
+        cJSON_AddItemToArray(rgv, cJSON_Duplicate(cJSON_GetArrayItem(gv, gi), 1));
+      cJSON_AddItemToObject(node, "game_versions", rgv);
+    }
+    cJSON *lds = cJSON_GetObjectItemCaseSensitive(ver, "loaders");
+    if (lds) cJSON_AddItemToObject(node, "loaders", cJSON_Duplicate(lds, 1));
+
+    int has_filter = (version && version[0]) || (loader && loader[0]);
+    result->node = realloc(result->node, (result->count + 1) * sizeof(cJSON *));
+    result->node[result->count++] = node;
+    if (has_filter) break;
+  }
+
+  if (result->count == 0) { rc = 1; goto cleanup; }
+
+cleanup:
+  free(response);
+  free(url);
+  cJSON_Delete(json);
+  if (rc != 0) { free_SearchResult(result); result = NULL; }
+  return result;
+}
+
+//mods未验证
+/**
+ * Fuzzy search for mods on Modrinth.
+ *
+ * API: GET /v3/search?query={slug} + filters (game_versions, categories)
+ * No per-hit version API calls — search results only, no download info.
+ *
+ * @return SearchResult with nodes:
+ *   { slug, title, author, description, downloads,
+ *     game_versions[], loaders[] }
+ */
+SearchResult *modrinth_search_mods(const char *slug, const char *version, const char *loader) {
+  int rc = 0;
+  char *response = NULL;
+  char *url = NULL;
+  cJSON *json = NULL;
+  SearchResult *result = NULL;
+
+  if (slug == NULL || *slug == '\0') { rc = 1; goto cleanup; }
+
+  char *eq = curl_encode(slug);
+  char *new_filters = NULL;
+  char *tmp = NULL;
+  if (version && version[0]) {
+    m_asprintf(&tmp, "game_versions IN [\"%s\"]", version);
+    m_asprintf(&new_filters, "%s", tmp);
+    free(tmp);
+  }
+  if (loader && loader[0]) {
+    char *sep = new_filters ? " AND " : "";
+    m_asprintf(&tmp, "%s%scategories IN [\"%s\"]", new_filters ? new_filters : "", sep, loader);
+    free(new_filters);
+    new_filters = tmp;
+  }
+  char *filt = NULL;
+  if (new_filters) {
+    char *enc = curl_encode(new_filters);
+    m_asprintf(&filt, "&new_filters=%s", enc);
+    free(enc);
+    free(new_filters);
+  }
+  m_asprintf(&url, "https://api.modrinth.com/v3/search?query=%s&limit=25&offset=0%s",
+             eq, filt ? filt : "");
+  free(eq);
+  free(filt);
+
+  if (curl_get(url, &response) != 0) { rc = 1; goto cleanup; }
+
+  json = cJSON_Parse(response);
+  if (!json) { rc = 1; goto cleanup; }
+
+  cJSON *hits = cJSON_GetObjectItemCaseSensitive(json, "hits");
+  if (!cJSON_IsArray(hits)) { rc = 1; goto cleanup; }
+
+  result = m_malloc(sizeof(SearchResult));
+  result->node = NULL;
+  result->count = 0;
+
+  cJSON *hit;
+  cJSON_ArrayForEach(hit, hits) {
+    cJSON *hslug = cJSON_GetObjectItemCaseSensitive(hit, "slug");
+    if (!cJSON_IsString(hslug)) continue;
+
+    cJSON *node = cJSON_CreateObject();
+    cJSON_AddStringToObject(node, "slug", hslug->valuestring);
+    cJSON *hname = cJSON_GetObjectItemCaseSensitive(hit, "title");
+    if (hname) cJSON_AddStringToObject(node, "title", hname->valuestring);
+    cJSON *hauth = cJSON_GetObjectItemCaseSensitive(hit, "author");
+    if (hauth) cJSON_AddStringToObject(node, "author", hauth->valuestring);
+    cJSON *hdesc = cJSON_GetObjectItemCaseSensitive(hit, "description");
+    if (hdesc) cJSON_AddStringToObject(node, "description", hdesc->valuestring);
+    cJSON *hdl = cJSON_GetObjectItemCaseSensitive(hit, "downloads");
+    if (hdl) cJSON_AddNumberToObject(node, "downloads", hdl->valueint);
+    cJSON *hvers = cJSON_GetObjectItemCaseSensitive(hit, "versions");
+    if (hvers) cJSON_AddItemToObject(node, "game_versions", cJSON_Duplicate(hvers, 1));
+    cJSON *hcat = cJSON_GetObjectItemCaseSensitive(hit, "display_categories");
+    if (hcat) cJSON_AddItemToObject(node, "loaders", cJSON_Duplicate(hcat, 1));
+
+    result->node = realloc(result->node, (result->count + 1) * sizeof(cJSON *));
+    result->node[result->count++] = node;
+  }
+
+  if (result->count == 0) { rc = 1; goto cleanup; }
+
+cleanup:
+  free(response);
+  free(url);
+  cJSON_Delete(json);
+  if (rc != 0) { free_SearchResult(result); result = NULL; }
+  return result;
 }

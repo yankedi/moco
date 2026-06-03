@@ -91,15 +91,13 @@ add_executable(moco
         src/utility/download/m_epoll.c
         src/command/start/start.c
         src/command/import/import.c
-        src/command/import/import.c
-        src/command/import/import.h
         src/utility/file/zip.c
         src/utility/file/zip.h
         src/utility/minecraft/version.c
-        src/utility/minecraft/version.c
-        src/utility/minecraft/version.h
         src/utility/modrinth/search.c
         src/utility/modrinth/search.h
+        src/utility/parser/modrinth/modpack.c
+        src/utility/parser/modrinth/modpack.h
 )
 
 target_link_libraries(moco PRIVATE

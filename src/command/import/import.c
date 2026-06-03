@@ -8,9 +8,11 @@
 #include "command/search/search.h"
 #include "interface.h"
 #include "m_exit.h"
+#include "utility/download/m_epoll.h"
 #include "utility/file/toml.h"
 #include "utility/file/zip.h"
 #include "utility/mtool.h"
+#include "utility/parser/modrinth/modpack.h"
 #include "utility/store/store.h"
 #include "zip.h"
 
@@ -193,17 +195,36 @@ int subcommand_handler(const char *subcommand) {
     rc = local_handler(subcommand);
     goto clearup;
   }
-  if (access("instance.toml", F_OK) != 0) fclose(fopen("instance.toml", "w"));
+  int is_version = (strcmp(prefix, "version") == 0);
+  int is_loader  = (strcmp(prefix, "loader") == 0);
+  if (access("instance.toml", F_OK) != 0) {
+    if (is_version) {
+      fclose(fopen("instance.toml", "w"));
+    }
+    else if (is_loader) { fprintf(stderr, "instance.toml not found, run 'moco import version:<ver>' first\n"); rc = 1; goto clearup; }
+  }
   instance_f = fopen("instance.toml","rb+");
-  if (access("instance-lock.toml", F_OK) != 0) fclose(fopen("instance-lock.toml", "w"));
+  if (!instance_f) { fprintf(stderr, "Failed to open instance.toml\n"); rc = 1; goto clearup; }
+  if (access("instance-lock.toml", F_OK) != 0)
+    fclose(fopen("instance-lock.toml", "w"));
   lock_f = fopen("instance-lock.toml","rb+");
+  if (!lock_f) { fprintf(stderr, "Failed to open instance-lock.toml\n"); rc = 1; goto clearup; }
   instance = toml_parse_file_ex("instance.toml");
   toml_datum_t instance_r = instance.toptab;
   toml_datum_t version = toml_seek(instance_r, "game.version");
+  toml_datum_t loader = toml_seek(instance_r, "dependencies.loader");
+  toml_datum_t modpack = toml_seek(instance_r, "game.modpack_slug");
   printf("prefix: %s, suffix: %s\n", prefix, suffix);
   lock = toml_parse_file_ex("instance-lock.toml");
-  toml_datum_t lock_r = lock.toptab;
+  toml_datum_t version_l = toml_get(lock.toptab, "version");
+  toml_datum_t loader_l = toml_get(lock.toptab, "loader");
+  toml_datum_t loader_version_l = toml_get(lock.toptab, "loader_version");
+  toml_datum_t modpack_l = toml_get(lock.toptab, "modpack");
   if (strcmp(prefix,"version") == 0) {
+    if (version_l.type == TOML_STRING) {
+      fprintf(stderr, "Version %s is already installed.\n", version_l.u.s);
+      goto clearup;
+    }
     if (version.type == TOML_STRING) {
       printf("Your game version has been declared in instance.toml:%s\n", version.u.s);
       goto clearup;
@@ -220,6 +241,10 @@ int subcommand_handler(const char *subcommand) {
     fflush(instance_f);
     installVersion_n();
   }else if (strcmp(prefix,"loader") == 0) {
+    if (loader_l.type == TOML_STRING) {
+      fprintf(stderr, "%s:%s is already installed.\n", loader_l.u.s, loader_version_l.type == TOML_STRING ? loader_version_l.u.s : "unknown");
+      goto clearup;
+    }
     if (suffix == NULL) {
       printf("Suffix is NULL\n");
       goto clearup;
@@ -248,11 +273,128 @@ int subcommand_handler(const char *subcommand) {
     fflush(instance_f);
     installDependencies();
   }else if (strcmp(prefix,"mod") == 0) {
-    result = search_mod(suffix);
+    toml_datum_t mod_l = toml_get(lock.toptab, suffix);
+    if (mod_l.type == TOML_STRING) {
+      fprintf(stderr, "%s:%s is already installed.\n",suffix, mod_l.u.s);
+    }
+    if (version.type != TOML_STRING) {
+      fprintf(stderr, "Please import your game version.\n");
+      rc = 1;
+      goto clearup;
+    }
+    printf("Version: %s\n", version.u.s);
+    if (loader.type != TOML_STRING) {
+      fprintf(stderr, "Please import your modloader.\n");
+      rc = 1;
+      goto clearup;
+    }
+    const char *ldr = loader.u.s;
+    if (strcmp(ldr, "fabric-loader") == 0) ldr = "fabric";
+    printf("Modloader: %s\n", ldr);
+    result = search_mod(suffix, version.u.s, ldr);
+    if (result == NULL) {
+      fprintf(stderr, "No matching mod found for %s\n", suffix);
+      rc = 1;
+      goto clearup;
+    }
+    printf("Mod:%s\n"
+           "Version:%s\n"
+           "URL:%s\n"
+           "SHA1:%s\n",
+           cJSON_GetObjectItemCaseSensitive(result->node[0],"slug")->valuestring,
+           cJSON_GetObjectItemCaseSensitive(result->node[0],"version")->valuestring,
+           cJSON_GetObjectItemCaseSensitive(result->node[0],"url")->valuestring,
+           cJSON_GetObjectItemCaseSensitive(result->node[0],"sha1")->valuestring);
+    cJSON *deps = cJSON_GetObjectItemCaseSensitive(result->node[0], "dependencies");
+    if (cJSON_IsArray(deps)) {
+      cJSON *dep;
+      cJSON_ArrayForEach(dep, deps) {
+        cJSON *pslug = cJSON_GetObjectItemCaseSensitive(dep, "slug");
+        cJSON *pid = cJSON_GetObjectItemCaseSensitive(dep, "project_id");
+        cJSON *dtype = cJSON_GetObjectItemCaseSensitive(dep, "dependency_type");
+        printf("  dep: %s (id=%s) type=%s\n",
+               pslug ? pslug->valuestring : "?",
+               pid ? pid->valuestring : "?",
+               dtype ? dtype->valuestring : "?");
+      }
+    }
+    //TODO mod下载
   }else if (strcmp(prefix,"modpack") == 0) {
-    result = search_modpack(suffix);
+    if (modpack_l.type == TOML_STRING) {
+      printf("Your modpack has been installed in instance-lock.toml:%s\n", modpack_l.u.s);
+      goto clearup;
+    }
+    if (modpack.type == TOML_STRING) {
+      printf("Your modpack has been declared in instance.toml:%s\n", modpack.u.s);
+      goto clearup;
+    }
+    result = search_modpack(suffix, version.u.s, NULL);
+    if (result == NULL) {
+      fprintf(stderr, "No matching modpack found for %s\n", suffix);
+      rc = 1;
+      goto clearup;
+    }
+    printf("Modpack:%s\n"
+           "Modpack_version:%s\n"
+           "Version:%s\n"
+           "Loader:%s\n",
+           cJSON_GetObjectItemCaseSensitive(result->node[0],"slug")->valuestring,
+           cJSON_GetObjectItemCaseSensitive(result->node[0],"version")->valuestring,
+           cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result->node[0],"game_versions"),0)->valuestring,
+           cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result->node[0],"loaders"),0)->valuestring);
+
+    Package *modpack_pkg = m_malloc(sizeof(Package));
+    char *cwd = getcwd(NULL, 0);
+    char *path;
+    m_asprintf(&path,"%s/%s.mrpack",cwd,cJSON_GetObjectItemCaseSensitive(result->node[0],"slug")->valuestring);
+    modpack_pkg->path = m_strdup(path);
+    modpack_pkg->sha1 = m_strdup(cJSON_GetObjectItemCaseSensitive(result->node[0],"sha1")->valuestring);
+    modpack_pkg->store = m_strdup(path);
+    modpack_pkg->url = m_strdup(cJSON_GetObjectItemCaseSensitive(result->node[0],"url")->valuestring);
+    printf("Downloading modpack to:%s\n",modpack_pkg->path);
+    submit_download_task(modpack_pkg);
+    wait_download_task(path);
+    parser_modrinth_modpack(path);
+    free(cwd);
+    free(path);
   }else if (strcmp(prefix,"shader") == 0) {
-    result = search_shader(suffix);
+    toml_datum_t shader_l = toml_get(lock.toptab, suffix);
+    if (shader_l.type == TOML_STRING) {
+      fprintf(stderr, "%s:%s is already installed.\n",suffix, shader_l.u.s);
+      goto clearup;
+    }
+    toml_datum_t shader = toml_get(toml_get(instance_r, "shaders"), suffix);
+    if (shader.type == TOML_STRING) {
+      printf("Your shader has been declared in instance.toml:%s\n", shader.u.s);
+      goto clearup;
+    }
+    result = search_shader(suffix, version.u.s, NULL);
+    if (result == NULL) {
+      fprintf(stderr, "No matching shader found for %s\n", suffix);
+      rc = 1;
+      goto clearup;
+    }
+    printf("Shader:%s\n"
+           "Shader_version:%s\n"
+           "Version:%s\n"
+           "Shader_Loader:%s\n",
+           cJSON_GetObjectItemCaseSensitive(result->node[0],"slug")->valuestring,
+           cJSON_GetObjectItemCaseSensitive(result->node[0],"version")->valuestring,
+           cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result->node[0],"game_versions"),0)->valuestring,
+           cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result->node[0],"loaders"),0)->valuestring);
+    Package *shader_pkg = m_malloc(sizeof(Package));
+    char *cwd = getcwd(NULL, 0);
+    char *path;
+    m_asprintf(&path,"%s/.minecraft/shaderpacks/%s.zip",cwd,cJSON_GetObjectItemCaseSensitive(result->node[0],"slug")->valuestring);
+    shader_pkg->path = m_strdup(path);
+    shader_pkg->sha1 = m_strdup(cJSON_GetObjectItemCaseSensitive(result->node[0],"sha1")->valuestring);
+    shader_pkg->store = m_strdup(path);
+    shader_pkg->url = m_strdup(cJSON_GetObjectItemCaseSensitive(result->node[0],"url")->valuestring);
+    printf("Downloading shader to:%s\n",shader_pkg->path);
+    submit_download_task(shader_pkg);
+    wait_download_task(path);
+    free(cwd);
+    free(path);
   }else {
     printf("Unknown prefix: %s\n", prefix);
     goto clearup;

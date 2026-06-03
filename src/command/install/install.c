@@ -566,8 +566,10 @@ int installDependencies(void) {
   }
   lock = toml_parse_file_ex("instance-lock.toml");
   toml_datum_t loader_l = toml_get(lock.toptab, "loader");
+  toml_datum_t loader_version_l = toml_get(lock.toptab, "loader_version");
   if (loader_l.type == TOML_STRING) {
     fprintf(stderr, "%s is already installed.\n", loader_l.u.s);
+    fprintf(stderr,"The loader_version: %s\n", loader_version_l.u.s);
     goto cleanup;
   }
   toml_datum_t rt = r.toptab;
@@ -584,6 +586,7 @@ int installDependencies(void) {
     goto cleanup;
   }
   lock_f = fopen("instance-lock.toml","rb+");
+
   if (strcmp(loader_type.u.s, "forge") == 0) {
     if (download_java() != 0) {
       fprintf(stderr, "Error downloading Java runtime, cannot continue installing Forge\n");

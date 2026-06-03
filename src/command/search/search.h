@@ -15,10 +15,8 @@ extern SearchResult *search_forges(const char *id, const search_mode mode);
 extern SearchResult *search_neoforge(const char *id, const search_mode mode);
 extern SearchResult *search_neoforges(const char *id, const search_mode mode);
 extern SearchResult *search_fabric(const char *v);
-extern SearchResult *search_mod(const char *slug);
-extern SearchResult *search_mods(const char *slug);
-extern SearchResult *search_modpack(const char *slug);
-extern SearchResult *search_modpacks(const char *slug);
-extern SearchResult *search_shader(const char *slug);
-extern SearchResult *search_shaders(const char *slug);
+extern SearchResult *search_mod(const char *slug, const char *version, const char *loader);
+extern SearchResult *search_mods(const char *slug, const char *version, const char *loader);
+extern SearchResult *search_modpack(const char *slug, const char *version, const char *loader);
+extern SearchResult *search_shader(const char *slug, const char *version, const char *loader);
 #endif // MOCO_SEARCH_H

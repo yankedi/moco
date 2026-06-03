@@ -65,27 +65,20 @@ void search(int argc, char *argv[]) {
   }
 }
 
-SearchResult *search_mod(const char *slug) {
-
+SearchResult *search_mod(const char *slug, const char *version, const char *loader) {
+  return modrinth_search_mod(slug, version, loader);
 }
 
-SearchResult *search_mods(const char *slug) {
-
+SearchResult *search_mods(const char *slug, const char *version, const char *loader) {
+  return modrinth_search_mods(slug, version, loader);
 }
 
-SearchResult *search_modpack(const char *slug) {
-
+SearchResult *search_modpack(const char *slug, const char *version, const char *loader) {
+  return modrinth_search_modpack(slug, version, loader);
 }
 
-SearchResult *search_modpacks(const char *slug) {
-
-}
-
-SearchResult *search_shader(const char *slug) {
-
-}
-SearchResult *search_shaders(const char *slug) {
-
+SearchResult *search_shader(const char *slug, const char *version, const char *loader) {
+  return modrinth_search_shader(slug, version, loader);
 }
 
 //TODO 超长文本分页显示
